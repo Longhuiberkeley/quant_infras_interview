@@ -40,11 +40,13 @@ public class BinanceStreamHealthIndicator implements HealthIndicator {
     // Check fleet-max lag against staleness threshold
     Map<String, AtomicLong> lastEventTimeBySymbol = webSocketClient.getLastEventTimeBySymbol();
     long now = System.currentTimeMillis();
-    long maxLag = lastEventTimeBySymbol.values().stream()
-        .mapToLong(AtomicLong::get)
-        .filter(t -> t > 0L)
-        .map(t -> now - t)
-        .max().orElse(0L);
+    long maxLag =
+        lastEventTimeBySymbol.values().stream()
+            .mapToLong(AtomicLong::get)
+            .filter(t -> t > 0L)
+            .map(t -> now - t)
+            .max()
+            .orElse(0L);
 
     if (maxLag > stalenessThresholdMs) {
       return Health.down()

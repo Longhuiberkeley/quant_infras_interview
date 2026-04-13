@@ -348,10 +348,12 @@ class BinanceWebSocketClientTest {
 
     long lastEvent = client.getLastEventTimeBySymbol().get("BTCUSDT").get();
     assertEquals(eventTime, lastEvent, "Last event time should be stored exactly");
-    
+
     // Test dynamic lag by computing current lag
     long currentLag = System.currentTimeMillis() - lastEvent;
-    assertTrue(currentLag >= 200 && currentLag < 5000, "Lag should dynamically compute to >= 200ms, but was " + currentLag);
+    assertTrue(
+        currentLag >= 200 && currentLag < 5000,
+        "Lag should dynamically compute to >= 200ms, but was " + currentLag);
   }
 
   // ── URL construction ──────────────────────────────────────────────────────

@@ -99,7 +99,8 @@ public class BinanceWebSocketClient extends WebSocketListener {
   // ── Lag metrics (DD-11) ──────────────────────────────────────────────────
 
   /** Per-symbol lag values, updated on the hot path with zero allocation. */
-  private final ConcurrentHashMap<String, AtomicLong> lastEventTimeBySymbol; // Fix: Store eventTime instead of static lag for dynamic metrics.
+  private final ConcurrentHashMap<String, AtomicLong>
+      lastEventTimeBySymbol; // Fix: Store eventTime instead of static lag for dynamic metrics.
 
   /**
    * Constructs the client and registers Micrometer gauges.
@@ -124,10 +125,13 @@ public class BinanceWebSocketClient extends WebSocketListener {
     List<String> symbols = appProperties.getSymbols();
     for (String symbol : symbols) {
       lastEventTimeBySymbol.putIfAbsent(symbol, new AtomicLong(0L));
-      Gauge.builder("binance.quote.lag.millis", lastEventTimeBySymbol, m -> {
-            long last = m.get(symbol).get();
-            return last == 0L ? 0L : System.currentTimeMillis() - last;
-          })
+      Gauge.builder(
+              "binance.quote.lag.millis",
+              lastEventTimeBySymbol,
+              m -> {
+                long last = m.get(symbol).get();
+                return last == 0L ? 0L : System.currentTimeMillis() - last;
+              })
           .tag("symbol", symbol)
           .register(meterRegistry);
     }
@@ -136,11 +140,13 @@ public class BinanceWebSocketClient extends WebSocketListener {
     Gauge.builder(
             "binance.quote.lag.max.millis",
             lastEventTimeBySymbol,
-            m -> m.values().stream()
-                .mapToLong(AtomicLong::get)
-                .filter(t -> t > 0L)
-                .map(t -> System.currentTimeMillis() - t)
-                .max().orElse(0L))
+            m ->
+                m.values().stream()
+                    .mapToLong(AtomicLong::get)
+                    .filter(t -> t > 0L)
+                    .map(t -> System.currentTimeMillis() - t)
+                    .max()
+                    .orElse(0L))
         .register(meterRegistry);
 
     // Scheduler for reconnect backoff (single-threaded, only used for scheduling retries)
