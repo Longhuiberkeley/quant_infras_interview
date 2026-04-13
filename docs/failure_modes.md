@@ -115,6 +115,16 @@ This signals engineering maturity without over-engineering.
 | **Implemented?** | **Yes** — `application-dev.yml` configures H2 |
 | **Verification** | Manual: `mvn spring-boot:run -Dspring.profiles.active=dev` |
 
+### FM-11: Data Loss on SIGTERM
+
+| Field | Detail |
+|-------|--------|
+| **Trigger** | `SIGTERM` (container stop, `kill`, orchestration restart) while messages are in the persistence queue |
+| **Impact** | In-flight queue items lost — never written to PostgreSQL |
+| **Mitigation** | `@PreDestroy` on `BatchPersistenceService` drains remaining queue items with a bounded timeout (`shutdownTimeoutMs`, default 2 s). `BinanceWebSocketClient`'s `@PreDestroy` (ordered first via `@Order(1)`) sets `shuttingDown = true`, stops accepting new messages, and sends a close frame before the drainer flushes. `@PreDestroy` on `BinanceWebSocketClient` also `await()`s the `onClosed` latch with a 3 s timeout to ensure the WebSocket thread is quiescent before the drainer starts its own shutdown. |
+| **Implemented?** | **Yes** — bounded drain in `BatchPersistenceService.shutdown()`; ordered `@PreDestroy` via `@Order` and constructor dependency |
+| **Verification** | `BatchPersistenceServiceTest#shutdownDrainsRemainingQueue`, `BatchPersistenceServiceTest#shutdownTimeoutRespected` |
+
 ### FM-12: Corrupt Market Data (Crossed Spread / Zero Price / Invalid Timestamp)
 
 | Field | Detail |
@@ -141,4 +151,5 @@ This signals engineering maturity without over-engineering.
 | FM-8 | Slow consumer | Documented | Load |
 | FM-9 | VPN / firewall | Documented | Network |
 | FM-10 | Startup failure | **Yes** | Infrastructure |
+| FM-11 | Data loss on SIGTERM | **Yes** | Durability |
 | FM-12 | Corrupt market data | **Yes** | Data |

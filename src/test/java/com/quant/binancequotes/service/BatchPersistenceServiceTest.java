@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -200,23 +202,157 @@ class BatchPersistenceServiceTest {
     startServiceWithMock(blockingRepo, smallProps());
     assertEquals(0, service.queueDepth());
 
-    // Enqueue a burst of 10 items
     for (int i = 0; i < 10; i++) {
       service.enqueue(makeQuote("DOGEUSDT", i + 1));
     }
 
-    // Give drainer time to pull the first batch (SMALL_BATCH = 5) and block on repo
     Thread.sleep(100);
 
-    // Drainer should have 5 items in its local batch, queue should have the remaining 5
     assertEquals(
         5, service.queueDepth(), "Queue should contain exactly 5 items while drainer is blocked");
 
-    // Unblock the repo
     repoBlocked.countDown();
 
-    // Wait for the queue to fully drain
     Thread.sleep(FAST_FLUSH + 500);
     assertEquals(0, service.queueDepth(), "Queue should be completely empty after draining");
+  }
+
+  @Test
+  void producerNeverBlocks() throws Exception {
+    CountDownLatch repoBlocked = new CountDownLatch(1);
+    QuoteRepository blockingRepo = mock(QuoteRepository.class);
+    when(blockingRepo.batchInsert(anyList()))
+        .thenAnswer(
+            inv -> {
+              repoBlocked.await(10, TimeUnit.SECONDS);
+              return ((List<?>) inv.getArgument(0)).size();
+            });
+
+    PersistenceProperties p = smallProps();
+    p.setQueueCapacity(10_000);
+    p.setDropOldestThreshold(0.9);
+    startServiceWithMock(blockingRepo, p);
+
+    int threads = 8;
+    int callsPerThread = 500;
+    AtomicLong maxLatencyNs = new AtomicLong(0);
+    CountDownLatch startGate = new CountDownLatch(1);
+    CountDownLatch doneGate = new CountDownLatch(threads);
+
+    for (int t = 0; t < threads; t++) {
+      int threadIdx = t;
+      Thread.ofVirtual()
+          .start(
+              () -> {
+                try {
+                  startGate.await();
+                } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  return;
+                }
+                for (int i = 0; i < callsPerThread; i++) {
+                  long start = System.nanoTime();
+                  service.enqueue(makeQuote("COIN" + threadIdx, i + 1));
+                  long elapsed = System.nanoTime() - start;
+                  maxLatencyNs.updateAndGet(cur -> Math.max(cur, elapsed));
+                }
+                doneGate.countDown();
+              });
+    }
+
+    startGate.countDown();
+    assertTrue(doneGate.await(30, TimeUnit.SECONDS), "All producer threads should finish");
+
+    long p99TargetNs = 50_000_000L;
+    assertTrue(
+        maxLatencyNs.get() < p99TargetNs,
+        "Max offer() latency was "
+            + (maxLatencyNs.get() / 1_000_000)
+            + " ms, expected < 50 ms (proving non-blocking behaviour)");
+
+    repoBlocked.countDown();
+    service.shutdown();
+  }
+
+  @Test
+  void shutdownTimeoutRespected() throws Exception {
+    CountDownLatch repoBlocked = new CountDownLatch(1);
+    QuoteRepository blockingRepo = mock(QuoteRepository.class);
+    when(blockingRepo.batchInsert(anyList()))
+        .thenAnswer(
+            inv -> {
+              repoBlocked.await(30, TimeUnit.SECONDS);
+              return 0;
+            });
+
+    PersistenceProperties p = smallProps();
+    p.setShutdownTimeoutMs(200);
+    startServiceWithMock(blockingRepo, p);
+
+    for (int i = 0; i < SMALL_BATCH * 3; i++) {
+      service.enqueue(makeQuote("ADAUSDT", i + 1));
+    }
+
+    Thread.sleep(100);
+
+    long start = System.nanoTime();
+    service.shutdown();
+    long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+    assertTrue(
+        elapsedMs < 2 * 200,
+        "shutdown() should return within 2x the timeout (400 ms), but took " + elapsedMs + " ms");
+
+    assertTrue(service.queueDepth() > 0, "Partial drain expected — some items should remain");
+
+    repoBlocked.countDown();
+  }
+
+  @Test
+  void sustains500rps() throws Exception {
+    AtomicInteger totalInserted = new AtomicInteger(0);
+    QuoteRepository countingRepo = mock(QuoteRepository.class);
+    when(countingRepo.batchInsert(anyList()))
+        .thenAnswer(
+            inv -> {
+              int count = ((List<?>) inv.getArgument(0)).size();
+              totalInserted.addAndGet(count);
+              return count;
+            });
+
+    PersistenceProperties p = smallProps();
+    p.setQueueCapacity(10_000);
+    p.setBatchSize(50);
+    p.setFlushMs(100);
+    startServiceWithMock(countingRepo, p);
+
+    int totalQuotes = 2_500;
+    long start = System.currentTimeMillis();
+    for (int i = 0; i < totalQuotes; i++) {
+      service.enqueue(makeQuote("LINKUSDT", i + 1));
+      if ((i + 1) % 500 == 0 && i < totalQuotes - 1) {
+        long elapsed = System.currentTimeMillis() - start;
+        long sleepMs = 1000 - elapsed;
+        if (sleepMs > 0) {
+          Thread.sleep(sleepMs);
+        }
+        start = System.currentTimeMillis();
+      }
+    }
+
+    for (int wait = 0; wait < 50 && totalInserted.get() < totalQuotes; wait++) {
+      Thread.sleep(200);
+    }
+
+    assertTrue(
+        totalInserted.get() >= totalQuotes,
+        "Expected at least "
+            + totalQuotes
+            + " persisted, got "
+            + totalInserted.get()
+            + " (drops="
+            + service.droppedCount()
+            + ")");
+    assertEquals(0, service.droppedCount(), "No drops expected at 500 rps with 10k queue");
   }
 }

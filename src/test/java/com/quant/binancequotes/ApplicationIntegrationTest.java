@@ -35,6 +35,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -388,11 +389,14 @@ class ApplicationIntegrationTest {
   @TestPropertySource(properties = "binance.ws.base-url=ws://localhost:1")
   static class DevProfileBootTest {
 
+    @Autowired private ApplicationContext context;
+
     @Test
     void contextLoads() {
       // Successful context load is the assertion. The WS client will fail to connect to
       // ws://localhost:1 and schedule backoff retries, but that doesn't fail the context.
       // H2 is used automatically via application-dev.yml.
+      assertThat(context).isNotNull();
     }
   }
 }

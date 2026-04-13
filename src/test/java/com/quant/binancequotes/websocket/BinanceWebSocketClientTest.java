@@ -360,10 +360,19 @@ class BinanceWebSocketClientTest {
 
   @Test
   void combinedStreamUrl_builtCorrectly() {
-    // The URL is built in start(), which we don't call to avoid real connections.
-    // We can verify the symbols are correctly configured.
     assertEquals(10, appProperties.getSymbols().size());
     assertTrue(appProperties.getSymbols().contains("BTCUSDT"));
     assertTrue(appProperties.getSymbols().contains("ETHUSDT"));
+  }
+
+  @Test
+  void reconnect_afterAbruptSocketClosure() {
+    assertFalse(client.isShuttingDown());
+
+    client.onClosed(mockWebSocket, 1006, "abnormal closure");
+
+    assertTrue(client.isReconnecting(), "reconnecting CAS should succeed on code 1006");
+    assertTrue(client.getCurrentBackoffMs() >= 2000L, "backoff should have been increased");
+    assertFalse(client.isShuttingDown(), "graceful-shutdown path should NOT be triggered");
   }
 }

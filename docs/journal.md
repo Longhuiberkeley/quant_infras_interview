@@ -7,6 +7,10 @@ journaling:
 1410. Attacking Phase 4. 
 1730. Completed Phase 5. 
 1840. Finished Phase 6. Refined Phase 7 TODOs quite a bit.
+Rate issues whatnot, and phase 7 takes longer than expected
+2030 to 2110. Dinner. 
+
+
 
 Available tools: 
 - Claude Code. Anthropic $20 plan

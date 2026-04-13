@@ -6,7 +6,9 @@ import com.quant.binancequotes.model.Quote;
 import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -137,24 +139,73 @@ class QuoteRepositoryIntegrationTest {
 
   @Test
   void mixedInsertAndConflictInSameBatch() throws Exception {
-    // First, insert one quote
     quoteRepository.batchInsert(List.of(makeQuote("BNBUSDT", 9_000_000L)));
 
-    // Now batch with 5 new + 1 duplicate
     List<Quote> mixed = new ArrayList<>();
     for (int i = 0; i < 5; i++) {
       mixed.add(makeQuote("BNBUSDT", 9_000_001L + i));
     }
-    mixed.add(makeQuote("BNBUSDT", 9_000_000L)); // duplicate
+    mixed.add(makeQuote("BNBUSDT", 9_000_000L));
 
     int inserted = quoteRepository.batchInsert(mixed);
-    assertThat(inserted).isEqualTo(5); // only the 5 new ones
+    assertThat(inserted).isEqualTo(5);
 
     try (Connection conn = dataSource.getConnection();
         Statement stmt = conn.createStatement();
         ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM quotes WHERE symbol = 'BNBUSDT'")) {
       assertThat(rs.next()).isTrue();
-      assertThat(rs.getInt(1)).isEqualTo(6); // 1 original + 5 new
+      assertThat(rs.getInt(1)).isEqualTo(6);
     }
+  }
+
+  @Test
+  void batchInsert_survivesRestart() throws Exception {
+    for (int i = 0; i < 10; i++) {
+      quoteRepository.batchInsert(List.of(makeQuote("TRXUSDT", 11_000_000L + i)));
+    }
+    assertTrxCount(11_000_000L, 10);
+
+    // In-place restart of the postgres process inside the existing container.
+    // Preserves data volume, schema, and host port mapping so the autowired
+    // HikariDataSource recovers on its next connection acquire. Container
+    // stop()/start() in Testcontainers would destroy the container and
+    // re-allocate a port, breaking every subsequent test in the class.
+    postgres.getDockerClient().restartContainerCmd(postgres.getContainerId()).exec();
+    waitForPostgresReady(Duration.ofSeconds(30));
+
+    for (int i = 0; i < 10; i++) {
+      quoteRepository.batchInsert(List.of(makeQuote("TRXUSDT", 12_000_000L + i)));
+    }
+    assertTrxCount(11_000_000L, 20);
+  }
+
+  private void assertTrxCount(long minUpdateId, int expected) throws SQLException {
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement();
+        ResultSet rs =
+            stmt.executeQuery(
+                "SELECT COUNT(*) FROM quotes WHERE symbol = 'TRXUSDT' AND update_id >= "
+                    + minUpdateId)) {
+      assertThat(rs.next()).isTrue();
+      assertThat(rs.getInt(1)).isEqualTo(expected);
+    }
+  }
+
+  private void waitForPostgresReady(Duration timeout) throws InterruptedException {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    SQLException last = null;
+    while (System.nanoTime() < deadline) {
+      try (Connection conn = dataSource.getConnection();
+          Statement stmt = conn.createStatement();
+          ResultSet rs = stmt.executeQuery("SELECT 1")) {
+        if (rs.next() && rs.getInt(1) == 1) {
+          return;
+        }
+      } catch (SQLException e) {
+        last = e;
+      }
+      Thread.sleep(250);
+    }
+    throw new IllegalStateException("PostgreSQL did not become ready within " + timeout, last);
   }
 }
