@@ -17,6 +17,9 @@ spring:
     init:
       mode: always
       continue-on-error: false
+  jackson:
+    generator:
+      write-big-decimal-as-plain: true
 
 server:
   port: ${SERVER_PORT:18080}
