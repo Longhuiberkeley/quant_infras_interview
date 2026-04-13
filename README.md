@@ -1,67 +1,30 @@
 # Binance Quote Streaming Service
 
-A 1-day Java take-home: a Spring Boot service that ingests real-time order-book quotes for **10 Binance USDT-M Perpetual** instruments over WebSocket, persists the full time-series history to PostgreSQL, and serves the latest quote per instrument over REST with sub-millisecond read latency.
+A production-grade Spring Boot service that ingests real-time order-book quotes for **10 Binance USDT-M Perpetual** instruments over WebSocket, persists full history to PostgreSQL, and serves the latest quote per instrument over REST with sub-millisecond read latency.
 
-Built per the specification in [`docs/interviewer_requirements.md`](docs/interviewer_requirements.md).
+Built as a timed exercise — end-to-end in a single session — emphasizing correctness, resilience, and auditability.
 
-## Architecture at a Glance
-
-```
-Binance WebSocket (fstream) ──▶ QuoteMessageParser ──▶ QuoteService (ConcurrentHashMap)
-                                      │                        │
-                                      ▼                        ▼
-                               (validation)            REST /api/quotes
-                                      │
-                                      ▼
-                          BatchPersistenceService ──▶ PostgreSQL (JdbcClient, batched)
-```
-
-- **Reads** never hit the database — `QuoteService` serves from an in-memory `ConcurrentHashMap`.
-- **Writes** are batched asynchronously on a single virtual thread (`quote-batch-writer`) with a bounded queue (10 000) and backpressure (drop-oldest at 90%).
-- **Deduplication** is handled by `UNIQUE(symbol, update_id)` + `ON CONFLICT DO NOTHING`.
-
-Full system diagram: [`docs/architecture.md`](docs/architecture.md).
-Design rationale (ADR-style): [`docs/design_decisions.md`](docs/design_decisions.md).
+Specification: [`docs/interviewer_requirements.md`](docs/interviewer_requirements.md).
 
 ## Quick Start
 
-### Prerequisites
-
-| Tool | Version |
-|------|---------|
-| Java | 21+ (Temurin recommended) |
-| Maven | 3.9+ |
-| Docker | optional, for `docker compose` path |
+**Prerequisites:** Java 21+, Maven 3.9+. Docker is optional.
 
 ```bash
 # SDKMAN users:
 source "$HOME/.sdkman/bin/sdkman-init.sh"
-```
 
-### Option A — Docker Compose (PostgreSQL + App)
-
-```bash
-cp .env.example .env          # customize if needed; defaults work out of the box
-docker compose up --build
-```
-
-Both containers come up healthy within ~60 s. The app connects to Binance live and starts ingesting immediately.
-
-### Option B — H2 Dev Profile (No Docker)
-
-```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
-```
-
-Runs against an in-memory H2 database. WebSocket ingestion still connects to Binance live.
-
-### Option C — Build & Test Only
-
-```bash
+# Build, format, and test (97 tests, no external infra needed)
 mvn clean verify
+
+# Run with in-memory H2 (no Docker required)
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
+
+# Run with PostgreSQL
+cp .env.example .env && docker compose up --build
 ```
 
-Runs Spotless (Google Java Format), compiles, and executes all 95+ tests. All tests are hermetic — no external network or database required.
+All tests are hermetic — no external network or database required. `mvn clean verify` is the single command that proves everything works.
 
 ## API Endpoints
 
@@ -99,6 +62,52 @@ curl -s localhost:18080/api/quotes | python3 -m json.tool
 ```
 
 Returns a JSON object keyed by symbol (`{"BTCUSDT": {...}, "ETHUSDT": {...}, ...}`), omitting symbols that have not yet received a WebSocket frame.
+
+## Architecture at a Glance
+
+```
+Binance WebSocket (fstream) ──▶ QuoteMessageParser ──▶ QuoteService (ConcurrentHashMap)
+                                       │                        │
+                                       ▼                        ▼
+                                (validation)            REST /api/quotes
+                                       │
+                                       ▼
+                           BatchPersistenceService ──▶ PostgreSQL (JdbcClient, batched)
+```
+
+- **Reads** never hit the database — `QuoteService` serves from an in-memory `ConcurrentHashMap`.
+- **Writes** are batched asynchronously on a single virtual thread (`quote-batch-writer`) with a bounded queue (10 000) and backpressure (drop-oldest at 90%).
+- **Deduplication** is handled by `UNIQUE(symbol, update_id)` + `ON CONFLICT DO NOTHING`.
+
+Full system diagram: [`docs/architecture.md`](docs/architecture.md).
+
+## Design Decisions
+
+Every non-obvious choice is documented as an ADR in [`docs/design_decisions.md`](docs/design_decisions.md). Highlights:
+
+| ID | Decision | Why |
+|----|----------|-----|
+| DD-1 | No JPA | `@GeneratedValue(IDENTITY)` silently breaks JDBC batching |
+| DD-2 | `BigDecimal` everywhere, `NUMERIC(24,8)` in DB | Money must not lose precision |
+| DD-3 | Reads never hit the DB | Sub-ms read latency via `ConcurrentHashMap` |
+| DD-6 | Non-blocking `offer` on persistence queue | Blocking on the WS thread causes Binance disconnects |
+| DD-9 | No `!bookTicker` firehose | Targeted combined-stream from the configured symbol list |
+| DD-10 | USDT-M Perpetuals (not SPOT) | SPOT `@bookTicker` omits `E` and `T` fields |
+| DD-11 | Micrometer lag gauges | Single number for real-time correctness |
+| DD-13 | Parser validates business invariants | Zero/negative prices, crossed spreads, future timestamps rejected |
+
+## Failure Modes
+
+Documented in [`docs/failure_modes.md`](docs/failure_modes.md). Summary:
+
+| Failure Mode | Mitigation |
+|--------------|------------|
+| WebSocket disconnect | Exponential backoff reconnect (1s → 60s cap) |
+| PostgreSQL unavailable | Bounded queue (10 000) absorbs ~3.3 min at 50 msg/s; batch writer retries with backoff |
+| Malformed JSON | Try-catch around parser; log + skip |
+| Message burst (backpressure) | Drop-oldest above 90% queue capacity with `WARN` log |
+| Reconnect storm | Atomic `reconnecting` guard; backoff resets only after first message post-open |
+| Graceful shutdown | `@PreDestroy` ordering: WS closes first, drainer flushes remaining items within bounded timeout |
 
 ## Observability
 
@@ -147,34 +156,6 @@ binance:
 ```
 
 The stream path (`/stream?streams=...`) is appended automatically.
-
-## Design Decisions
-
-Every non-obvious choice is documented as an ADR in [`docs/design_decisions.md`](docs/design_decisions.md). Highlights:
-
-| ID | Decision | Why |
-|----|----------|-----|
-| DD-1 | No JPA | `@GeneratedValue(IDENTITY)` silently breaks JDBC batching |
-| DD-2 | `BigDecimal` everywhere, `NUMERIC(24,8)` in DB | Money must not lose precision |
-| DD-3 | Reads never hit the DB | Sub-ms read latency via `ConcurrentHashMap` |
-| DD-6 | Non-blocking `offer` on persistence queue | Blocking on the WS thread causes Binance disconnects |
-| DD-9 | No `!bookTicker` firehose | Targeted combined-stream from the configured symbol list |
-| DD-10 | USDT-M Perpetuals (not SPOT) | SPOT `@bookTicker` omits `E` and `T` fields |
-| DD-11 | Micrometer lag gauges | Single number for real-time correctness |
-| DD-13 | Parser validates business invariants | Zero/negative prices, crossed spreads, future timestamps rejected |
-
-## Failure Modes
-
-Documented in [`docs/failure_modes.md`](docs/failure_modes.md). Summary:
-
-| Failure Mode | Mitigation |
-|--------------|------------|
-| WebSocket disconnect | Exponential backoff reconnect (1s → 60s cap) |
-| PostgreSQL unavailable | Bounded queue (10 000) absorbs ~3.3 min at 50 msg/s; batch writer retries with backoff |
-| Malformed JSON | Try-catch around parser; log + skip |
-| Message burst (backpressure) | Drop-oldest above 90% queue capacity with `WARN` log |
-| Reconnect storm | Atomic `reconnecting` guard; backoff resets only after first message post-open |
-| Graceful shutdown | `@PreDestroy` ordering: WS closes first, drainer flushes remaining items within bounded timeout |
 
 ## Test Quality
 
