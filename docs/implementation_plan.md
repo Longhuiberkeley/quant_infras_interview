@@ -19,7 +19,10 @@ binance-quote-service/
 │   ├── design_decisions.md
 │   ├── failure_modes.md
 │   ├── requirement_traceability.md
-│   └── implementation_plan.md       (this file)
+│   ├── implementation_plan.md       (this file)
+│   ├── audit_checklist.md           (Phase 7.5: structured pre-submission audit)
+│   ├── audit_results.md             (Phase 7.5: execution record)
+│   └── journal.md                   (development log)
 │
 ├── src/
 │   ├── main/
@@ -285,19 +288,35 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 
 **Goal.** Verify the codebase, test suite, and documentation are internally consistent before writing final prose. No new production code or tests are produced in this phase.
 
+**Audit framework.** This phase executes the structured checklist in [`docs/audit_checklist.md`](./audit_checklist.md) (10 pillars, ~55 checks). Results are recorded in [`docs/audit_results.md`](./audit_results.md). Each check traces back to interviewer requirements, design decisions (DD-\*), and failure modes (FM-\*) per the V-model.
+
 **Deliverables.**
+- Completed `docs/audit_results.md` for pillars P1–P9 and P10a (internal docs).
 - Green `mvn clean verify`.
-- Every test method named in `requirement_traceability.md` exists in the codebase (scripted `grep` check).
-- Every `DD-*` and `FM-*` cross-reference across all docs points to a real entry.
-- `grep -r '@Disabled\|@Ignore' src/test/` returns zero hits.
-- `mvn dependency:tree | grep -i jpa` returns nothing.
-- Spotless passes (`mvn spotless:check`).
+- All checks in `audit_checklist.md` pillars P1–P9 pass.
+- All checks in P10a (internal doc consistency) pass.
 - Commit log reviewed: reads as a clean narrative, no `wip` / `fix fix` / orphan commits.
 - Any drift found is corrected (test rename, stale doc reference, etc.) and committed as a single fixup.
 
+**Pillar summary (P10b runs after Phase 8):**
+
+| Pillar | Description | Phase |
+|--------|-------------|-------|
+| P1 | Requirement Completeness | 7.5 |
+| P2 | Financial Domain Correctness | 7.5 |
+| P3 | Data Integrity End-to-End | 7.5 |
+| P4 | Java & Concurrency Correctness | 7.5 |
+| P5 | Architecture Invariant Compliance | 7.5 |
+| P6 | Spring Boot & Lifecycle | 7.5 |
+| P7 | Security | 7.5 |
+| P8 | Test Quality & Anti-Cheating | 7.5 |
+| P9 | Operational Readiness | 7.5 |
+| P10a | Internal Doc Consistency | 7.5 |
+| P10b | External Doc Consistency (README/CLAUDE.md) | After Phase 8 |
+
 **Review before moving on.**
 - **Gate command:** `mvn clean verify` passes.
-- All scripted checks above pass. If any fail, fix and re-run before proceeding to Phase 8.
+- All checks in pillars P1–P9 and P10a pass. If any fail, fix and re-run before proceeding to Phase 8.
 - The system is now considered locked: Phase 8 (README, CLAUDE.md) describes this exact state.
 
 **Commit.** `chore: audit lock — verify doc/test/code consistency` (only if drift was corrected; skip commit if everything was already consistent).

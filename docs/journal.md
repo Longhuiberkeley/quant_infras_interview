@@ -3,6 +3,8 @@ journaling:
 1200. Really sit down by the computer and do work. Primarily refine the plan a few times. Primarily on what 
 1320. Phase 0 started. [continuously chatting with llm on how to improve]
 1425. Done with Phase 1. And trying to review Phase 1. 
+1330. Cat stepped onto the laptop. It restarted. Computer time got messed up...
+1410. Attacking Phase 4. 
 
 Available tools: 
 - Claude Code. Anthropic $20 plan
