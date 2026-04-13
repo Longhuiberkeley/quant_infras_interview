@@ -63,7 +63,7 @@ This signals engineering maturity without over-engineering.
 | **Impact** | Would cause duplicate rows in PostgreSQL |
 | **Mitigation** | Schema declares `UNIQUE(symbol, update_id)`; write path uses `INSERT ... ON CONFLICT (symbol, update_id) DO NOTHING`. Binance's per-symbol `u` (orderbook update id) is the natural dedup key. See `design_decisions.md` DD-7. The in-memory map always holds the latest (key = symbol), so reads are unaffected. |
 | **Implemented?** | **Yes** — at the schema level; zero application-side dedup logic required. |
-| **Verification** | `QuoteRepositoryIntegrationTest#duplicateUpdateId_isIgnored` |
+| **Verification** | `QuoteRepositoryIntegrationTest#duplicateSymbolUpdateIdIsSilentlyIgnored` |
 
 ### FM-6: JVM Crash / OOM
 

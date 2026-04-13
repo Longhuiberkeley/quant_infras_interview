@@ -127,22 +127,22 @@ Maps each failure mode from [`failure_modes.md`](./failure_modes.md) to the miti
 | FM ID | Failure Mode | Mitigation Module | Test(s) Proving Mitigation |
 |-------|--------------|-------------------|----------------------------|
 | FM-1 | WebSocket disconnect | `BinanceWebSocketClient` — exponential backoff reconnect with atomic in-flight guard | `BinanceWebSocketClientTest#reconnect_schedulesOnce_underStormOfClosures`, `BinanceWebSocketClientTest#reconnect_afterAbruptSocketClosure`, `ApplicationIntegrationTest#reconnectAfterNetworkDrop` |
-| FM-2 | DB temporarily unavailable | `BatchPersistenceService` — bounded queue absorbs burst + capped exponential retry | `BatchPersistenceServiceTest#retriesOnTransientSqlFailure`, `QuoteRepositoryIntegrationTest#batchInsert_survivesRestart` |
+| FM-2 | DB temporarily unavailable | `BatchPersistenceService` — bounded queue absorbs burst + capped exponential retry | `BatchPersistenceServiceTest#retryOneByOneOnBatchFailure`, `QuoteRepositoryIntegrationTest#batchInsert_survivesRestart` |
 | FM-3 | Malformed JSON message | `QuoteMessageParser` — try/catch, log raw, skip | `QuoteMessageParserTest#malformedJson_returnsEmpty`, `QuoteMessageParserTest#subscriptionAckFrame_returnsEmpty` |
-| FM-4 | High message burst (backpressure) | `BatchPersistenceService` — non-blocking `offer` with drop-oldest above 90% depth | `BatchPersistenceServiceTest#dropOldest_whenQueueAboveThreshold`, `BatchPersistenceServiceTest#producerNeverBlocks` |
-| FM-5 | Duplicate messages on reconnect | Schema — `UNIQUE(symbol, update_id)` + `INSERT ... ON CONFLICT DO NOTHING` | `QuoteRepositoryIntegrationTest#duplicateUpdateId_isIgnored` |
+| FM-4 | High message burst (backpressure) | `BatchPersistenceService` — non-blocking `offer` with drop-oldest above 90% depth | `BatchPersistenceServiceTest#dropOldestFiresWhenQueueOverflows`, `BatchPersistenceServiceTest#producerNeverBlocks` |
+| FM-5 | Duplicate messages on reconnect | Schema — `UNIQUE(symbol, update_id)` + `INSERT ... ON CONFLICT DO NOTHING` | `QuoteRepositoryIntegrationTest#duplicateSymbolUpdateIdIsSilentlyIgnored` |
 | FM-6 | JVM crash / OOM | Bounded queue cap + `-Xmx` in README | *Documented*: DD-6 bounds max in-flight loss to queue capacity (~3 min at 50 msg/s) |
-| FM-7 | Clock skew | `Quote` uses Binance `eventTime` for business logic; `receivedAt` is debug-only | `QuoteMessageParserTest#eventTimePreserved`, `QuoteServiceTest#monotonicByUpdateId` |
+| FM-7 | Clock skew | `Quote` uses Binance `eventTime` for business logic; `receivedAt` is debug-only | `QuoteMessageParserTest#eventTimeAndTransactionTime_mappedFromEAndT`, `QuoteServiceTest#newerUpdateIdReplacesOlder` |
 | FM-8 | Slow REST consumer | O(1) in-memory read path, non-blocking | `QuoteServicePerformanceTest#p99ReadUnder1ms`, Tomcat default pool sizing |
 | FM-9 | VPN / firewall | OkHttp proxy support via `BinanceProperties.proxy` | *Documented* in README (dev-environment concern) |
 | FM-10 | Application startup failure | `dev` profile with H2; actuator health for orchestration | `ApplicationIntegrationTest#bootsUnderDevProfile_withoutPostgres` |
-| FM-12 | Corrupt market data | `QuoteMessageParser` — validates `bid > 0`, `ask > 0`, `bid ≤ ask`, positive `eventTime` (DD-13); schema CHECK constraints as backstop | `QuoteMessageParserTest#crossedSpread_returnsEmpty`, `QuoteMessageParserTest#zeroPrice_returnsEmpty` |
+| FM-12 | Corrupt market data | `QuoteMessageParser` — validates `bid > 0`, `ask > 0`, `bid ≤ ask`, positive `eventTime` (DD-13); schema CHECK constraints as backstop | `QuoteMessageParserTest#crossedSpread_returnsEmpty`, `QuoteMessageParserTest#zeroPrice_bid_returnsEmpty`, `QuoteMessageParserTest#zeroPrice_ask_returnsEmpty` |
 
 **Shutdown / durability NFR (beyond the original FM list):**
 
 | ID | Concern | Module | Test |
 |----|---------|--------|------|
-| FM-11 | Data loss on SIGTERM | `BatchPersistenceService` — `@PreDestroy` drains queue with bounded timeout | `BatchPersistenceServiceTest#shutdownFlushesQueue`, `BatchPersistenceServiceTest#shutdownTimeoutRespected` |
+| FM-11 | Data loss on SIGTERM | `BatchPersistenceService` — `@PreDestroy` drains queue with bounded timeout | `BatchPersistenceServiceTest#shutdownDrainsRemainingQueue`, `BatchPersistenceServiceTest#shutdownTimeoutRespected` |
 
 **SLOs (from `architecture.md` §8) → Tests:**
 

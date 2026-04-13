@@ -12,7 +12,7 @@ to record vs. what to leave to pass/fail of `mvn verify`). Audit check P10a.10 i
 
 ## 7.1 — Integration Happy Path
 
-- **Commit:** _(pending — will be filled by 7.1 commit)_
+- **Commit:** `35a59d7`
 - **Date:** 2026-04-13
 - **`mvn clean verify`:** PASS (75 tests, 0 failures, 0 errors)
 
@@ -48,22 +48,22 @@ to record vs. what to leave to pass/fail of `mvn verify`). Audit check P10a.10 i
 ## 7.2 — Precision & Traceability
 
 - **Commit:** _(pending)_
-- **Date:** _(pending)_
-- **`mvn clean verify`:** _(pending)_
+- **Date:** 2026-04-13
+- **`mvn clean verify`:** PASS (78 tests, 0 failures, 0 errors)
 
 ### `BigDecimal` round-trip assertions
 
 | Stage | Example value | `scale()` | `unscaledValue()` | Plain-decimal string preserved? |
 |-------|---------------|-----------|-------------------|--------------------------------|
 | Initial construction | `new BigDecimal("0.00000001")` | 8 | 1 | — |
-| After Jackson serialize → deserialize | _(pending)_ | _(pending)_ | _(pending)_ | _(pending)_ |
-| After DB INSERT → SELECT | _(pending)_ | _(pending)_ | _(pending)_ | _(pending)_ |
-| After full chain (JSON → DB → JSON) | _(pending)_ | _(pending)_ | _(pending)_ | _(pending)_ |
+| After Jackson serialize → deserialize | `new BigDecimal("67432.15000001")` | 8 | `6743215000001` | Yes |
+| After DB INSERT → SELECT | `new BigDecimal("67432.15000001")` | 8 | `6743215000001` | Yes |
+| After full chain (JSON → DB → JSON) | `new BigDecimal("67432.15000001")` | 8 | `6743215000001` | Yes |
 
 ### Traceability rename audit
 
-- `rg "Test#" docs/requirement_traceability.md` → every method name resolves in `src/test/`: _(pending)_
-- `rg -n "duplicateUpdateId_isIgnored" docs/` → zero matches expected: _(pending)_
+- `rg "Test#" docs/requirement_traceability.md` → every method name resolves in `src/test/`: PASS
+- `rg -n "duplicateUpdateId_isIgnored" docs/` → zero matches expected: PASS
 
 ---
 
