@@ -45,7 +45,7 @@
 ## 2. Data Flow
 
 1. **Ingest.** `BinanceWebSocketClient` opens a single OkHttp connection to the targeted combined stream — `wss://fstream.binance.com/stream?streams=btcusdt@bookTicker/ethusdt@bookTicker/...` — built from the configured symbol list at startup. USDT-M Perpetuals rather than SPOT because the SPOT `@bookTicker` payload omits the event-time and transaction-time fields we rely on for lag observability (see `design_decisions.md` DD-10).
-2. **Parse.** Raw JSON (wrapper shape `{"stream":"...","data":{...}}`) is unwrapped and deserialized into an immutable `Quote` record (`symbol`, `bid`, `bidSize`, `ask`, `askSize`, `updateId`, `eventTime` [Binance `E`], `transactionTime` [Binance `T`], `receivedAt`). All numeric fields are `BigDecimal`.
+2. **Parse.** Raw JSON (wrapper shape `{"stream":"...","data":{...}}`) is unwrapped and deserialized into an immutable `Quote` record (`symbol`, `bid`, `bidSize`, `ask`, `askSize`, `updateId`, `eventTime` [Binance `E`], `transactionTime` [Binance `T`], `receivedAt`). All numeric fields are `BigDecimal`. Business invariants (positive prices, non-crossed spread, valid timestamps) are validated before construction; corrupt messages are dropped (DD-13).
 3. **Route — two parallel paths.**
    - **Hot path (reads):** `QuoteService` updates a `ConcurrentHashMap<String, Quote>`. O(1) reads, sub-microsecond in practice.
    - **Warm path (persistence):** `BatchPersistenceService` `offer`s onto a bounded `LinkedBlockingQueue<Quote>` (capacity 10 000). A single named virtual thread drains up to `persistence.batch-size` items (default 200) or flushes on `persistence.flush-ms` timeout (default 500), whichever comes first, and issues one `INSERT ... ON CONFLICT (symbol, update_id) DO NOTHING` via `JdbcClient.batchUpdate`.
@@ -102,8 +102,11 @@ CREATE TABLE IF NOT EXISTS quotes (
     update_id        BIGINT NOT NULL,
     event_time       BIGINT NOT NULL,   -- Binance `E` (ms since epoch)
     transaction_time BIGINT NOT NULL,   -- Binance `T` (ms since epoch)
-    received_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT quotes_symbol_updateid_uk UNIQUE (symbol, update_id)
+    received_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    CONSTRAINT quotes_symbol_updateid_uk UNIQUE (symbol, update_id),
+    CONSTRAINT chk_positive_bid  CHECK (bid_price > 0),
+    CONSTRAINT chk_positive_ask  CHECK (ask_price > 0),
+    CONSTRAINT chk_nonneg_sizes CHECK (bid_size >= 0 AND ask_size >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_quotes_symbol_time
@@ -113,6 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_quotes_symbol_time
 - `UNIQUE(symbol, update_id)` enables `INSERT ... ON CONFLICT DO NOTHING` for natural dedup on WebSocket reconnect replays (see DD-7, FM-5).
 - `BIGSERIAL` PK is retained because we never fetch the generated id — batching is safe under `JdbcClient`.
 - `NUMERIC(24,8)` matches Binance's decimal string precision exactly (see DD-2).
+- CHECK constraints reject corrupt prices and sizes at the DB level (see DD-13).
 
 ## 7. API Endpoints
 

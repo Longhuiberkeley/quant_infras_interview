@@ -196,6 +196,23 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 
 ---
 
+## DD-13 — Quote-level data integrity validation in parser + schema CHECK constraints
+
+**Context.** Binance is reliable, but any financial system must treat external data as untrusted. A zero price, a crossed spread (bid > ask), a negative size, or a timestamp in the far future indicates either a corrupt message or a parser bug. Silently persisting corrupt data is worse than dropping it — it poisons the historical record and any downstream analytics.
+
+**Decision.** Two layers of defense:
+1. `QuoteMessageParser` validates business invariants before constructing a `Quote`: `bid > 0`, `ask > 0`, `bidSize >= 0`, `askSize >= 0`, `bid <= ask`, `eventTime > 0`, `eventTime` not in the far future (within 1 hour). Invalid messages are logged at `WARN` and skipped (return `Optional.empty()`).
+2. `schema.sql` adds CHECK constraints as a backstop: `bid_price > 0`, `ask_price > 0`, `bid_size >= 0`, `ask_size >= 0`. Even if application validation has a bug, the DB rejects corrupt rows.
+
+**Alternatives considered.**
+- *Validate only at the schema level.* Rejected: INSERT failures are expensive (network round-trip, retry, log noise). Catching corrupt data at parse time is cheaper and produces clearer diagnostics.
+- *No validation — trust Binance.* Rejected: signals financial naivety. Every production trading system validates inbound market data.
+- *Reject zero sizes.* Not chosen: a zero bid/ask size is valid in some markets (one side is empty). We allow it but require non-negative.
+
+**Consequences.** The parser returns `Optional.empty()` for corrupt messages, consistent with the existing `FM-3` handling of malformed JSON. Adds ~10 lines of validation logic. Schema CHECK constraints are enforced on every INSERT; `ON CONFLICT DO NOTHING` rows bypass them (they're never inserted), so there's no performance concern.
+
+---
+
 ## Decisions NOT made (explicit deferrals)
 
 - **Hydrating the in-memory map from the DB at boot.** Worth the complexity only if startup freshness matters more than waiting a few seconds for the WS. It doesn't, here.

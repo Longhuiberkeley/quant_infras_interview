@@ -115,6 +115,16 @@ This signals engineering maturity without over-engineering.
 | **Implemented?** | **Yes** — `application-dev.yml` configures H2 |
 | **Verification** | Manual: `mvn spring-boot:run -Dspring.profiles.active=dev` |
 
+### FM-12: Corrupt Market Data (Crossed Spread / Zero Price / Invalid Timestamp)
+
+| Field | Detail |
+|-------|--------|
+| **Trigger** | Binance sends a malformed quote (zero price, crossed spread, future timestamp), or a parser bug misinterprets fields |
+| **Impact** | Invalid data persisted to DB; downstream consumers see impossible market state |
+| **Mitigation** | `QuoteMessageParser` validates business invariants before constructing `Quote` (DD-13). Schema CHECK constraints provide a DB-level backstop. |
+| **Implemented?** | **Yes** — parser validation + schema CHECK constraints |
+| **Verification** | `QuoteMessageParserTest#crossedSpread_returnsEmpty`, `QuoteMessageParserTest#zeroPrice_returnsEmpty` |
+
 ---
 
 ## Summary Matrix
@@ -131,3 +141,4 @@ This signals engineering maturity without over-engineering.
 | FM-8 | Slow consumer | Documented | Load |
 | FM-9 | VPN / firewall | Documented | Network |
 | FM-10 | Startup failure | **Yes** | Infrastructure |
+| FM-12 | Corrupt market data | **Yes** | Data |

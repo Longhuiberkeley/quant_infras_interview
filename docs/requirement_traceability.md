@@ -135,6 +135,7 @@ Maps each failure mode from [`failure_modes.md`](./failure_modes.md) to the miti
 | FM-8 | Slow REST consumer | O(1) in-memory read path, non-blocking | `QuoteServicePerformanceTest#p99ReadUnder1ms`, Tomcat default pool sizing |
 | FM-9 | VPN / firewall | OkHttp proxy support via `BinanceProperties.proxy` | *Documented* in README (dev-environment concern) |
 | FM-10 | Application startup failure | `dev` profile with H2; actuator health for orchestration | `ApplicationIntegrationTest#bootsUnderDevProfile_withoutPostgres` |
+| FM-12 | Corrupt market data | `QuoteMessageParser` — validates `bid > 0`, `ask > 0`, `bid ≤ ask`, positive `eventTime` (DD-13); schema CHECK constraints as backstop | `QuoteMessageParserTest#crossedSpread_returnsEmpty`, `QuoteMessageParserTest#zeroPrice_returnsEmpty` |
 
 **Shutdown / durability NFR (beyond the original FM list):**
 

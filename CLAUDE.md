@@ -18,6 +18,16 @@ Full spec: `docs/interviewer_requirements.md`.
 
 If a decision in the code looks surprising, check `design_decisions.md` before changing it.
 
+## Prerequisites
+
+Java 21 and Maven 3.9+ must be on `$PATH`. This project uses **SDKMAN!** for toolchain management. If `mvn` or `java` is not found, initialise SDKMAN first:
+
+```bash
+source "$HOME/.sdkman/bin/sdkman-init.sh"
+```
+
+Installed versions: `21.0.6-tem` (Java), `3.9.14` (Maven).
+
 ## Stack
 
 - Java 21 (records, virtual threads, pattern matching).
@@ -53,6 +63,7 @@ If a decision in the code looks surprising, check `design_decisions.md` before c
 - **No hydrating the map from DB at startup.** The WebSocket repopulates in seconds; see `design_decisions.md` §deferrals.
 - **No `@Disabled` / `@Ignore`d tests.** Fix or delete.
 - **Exactly 10 symbols, uppercase, USDT-quoted.** Validated at startup (`AppProperties`); the list is configurable but the shape is not.
+- **No unvalidated market data.** The parser rejects quotes with zero/negative prices, crossed spreads (`bid > ask`), or implausible timestamps (DD-13). Schema CHECK constraints backstop this at the DB level.
 
 ## Architecture invariants
 

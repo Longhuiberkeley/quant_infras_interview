@@ -115,6 +115,7 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - `application-dev.yml` — H2 file DB fallback.
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - Spotless actually rejects unformatted code (introduce a stray space, confirm `mvn verify` fails).
 - `mvn dependency:tree | grep -i jpa` returns nothing.
 - Boot log includes the virtual-threads line.
@@ -132,12 +133,13 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - `Quote.java` — `record Quote(String symbol, BigDecimal bid, BigDecimal bidSize, BigDecimal ask, BigDecimal askSize, long updateId, long eventTime, long transactionTime, Instant receivedAt)`. `eventTime` maps to Binance `E`, `transactionTime` to Binance `T` (both ms since epoch; available on USDT-M Perps `@bookTicker` — see DD-10).
 - No `QuoteDto` (DD-12): the record is serialized directly by the controller.
 - `AppProperties.java` — `@ConfigurationProperties("app")` with `@NotNull`, `@Size(min=10, max=10)` validation on the symbol list + `@Pattern("[A-Z]+USDT")`.
-- `schema.sql` — per `architecture.md` §6 (includes `transaction_time` column).
+- `schema.sql` — per `architecture.md` §6 (includes `transaction_time` column and CHECK constraints per DD-13).
 - Unit: `QuoteTest`, `AppPropertiesTest`.
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - All monetary fields are `BigDecimal`, `Quote` is immutable.
-- Schema has `UNIQUE(symbol, update_id)`, `transaction_time` column, and the composite index.
+- Schema has `UNIQUE(symbol, update_id)`, `transaction_time` column, the composite index, and CHECK constraints on `bid_price > 0`, `ask_price > 0`, `bid_size >= 0`, `ask_size >= 0`.
 - Deleting a symbol from the list prevents boot.
 - No JPA annotations on any model class.
 
@@ -154,6 +156,7 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - Unit: `QuoteServiceTest` (concurrent correctness, monotonic-by-updateId).
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - `update` uses `compute`/`merge` — no TOCTOU races between `get` and `put`.
 - `all()` returns an immutable snapshot.
 - No `synchronized` anywhere.
@@ -175,6 +178,7 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - Integration: `QuoteRepositoryIntegrationTest` (Testcontainers `postgres:16-alpine`) covering dedup conflict path.
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - Drainer thread appears as `quote-batch-writer` in `jcmd Thread.print`.
 - Batch size / flush ms are config-driven, not magic numbers.
 - Drop-oldest `WARN` fires in the overflow unit test.
@@ -191,7 +195,7 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 
 **Deliverables.**
 - `BinanceProperties.java` — base URL (default `wss://fstream.binance.com`), optional proxy, staleness threshold.
-- `QuoteMessageParser.java` — Jackson configured for `BigDecimal`; unwraps `{"stream":"...","data":{...}}`; parses `E` → `eventTime`, `T` → `transactionTime`; returns `Optional<Quote>`; silently skips subscription acks.
+- `QuoteMessageParser.java` — Jackson configured for `BigDecimal`; unwraps `{"stream":"...","data":{...}}`; parses `E` → `eventTime`, `T` → `transactionTime`; validates business invariants (`bid > 0`, `ask > 0`, `bid ≤ ask`, positive `eventTime` — see DD-13); returns `Optional<Quote>`; silently skips invalid and subscription acks.
 - `BinanceWebSocketClient.java` — OkHttp `WebSocketListener`; combined-stream URL (`/stream?streams=...`) built from `AppProperties.symbols`; exponential backoff 1 → 2 → 4 → … → 60 s; atomic `AtomicBoolean reconnecting` guard; `volatile boolean shuttingDown` guard checked before every reconnect schedule; resets backoff **after first message**, not socket-open; on message → `QuoteService.update` + `BatchPersistenceService.enqueue`.
 - **WebSocket graceful shutdown** — `@PreDestroy` sets `shuttingDown = true`, cancels pending reconnect, calls `webSocket.close(1000, "application shutdown")`, awaits `onClosed` with a bounded timeout (default 3 s). This must run **before** `BatchPersistenceService.@PreDestroy` so the drainer sees a closed input before flushing.
 - `BinanceStreamHealthIndicator.java`.
@@ -202,11 +206,13 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - Unit: `QuoteMessageParserTest` (includes `E`/`T` parsing), `BinanceWebSocketClientTest`.
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - Built URL uses `fstream.binance.com` and is logged once on startup.
 - Storm of `onClosed` + `onFailure` spawns exactly one reconnect (unit test with atomic counter).
 - `@PreDestroy` path: `shuttingDown` flag stops reconnect scheduling; close frame is sent; `onClosed` callback completes; drainer only starts its own `@PreDestroy` afterwards.
 - Backoff resets only on first inbound message post-open.
 - Parser handles the `/stream` wrapper, populates both `eventTime` and `transactionTime`.
+- Parser rejects `bid > ask` (crossed spread), zero prices, and future-dated `eventTime` with a `WARN` log (see DD-13).
 - Per-symbol lag gauges visible at `/actuator/metrics/binance.quote.lag.millis?tag=symbol:BTCUSDT`; fleet-max at `/actuator/metrics/binance.quote.lag.max.millis`.
 
 **Commit.** `feat(ws): targeted combined-stream ingestion with resilient reconnect`.
@@ -224,6 +230,7 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - Unit: `QuoteControllerTest` (`@WebMvcTest`).
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - 404 path is centralized in `@ControllerAdvice`.
 - `BigDecimal` fields serialize as plain decimals (`67432.15`, not `6.743215E4`).
 - 404 responses do not leak stack traces.
@@ -242,6 +249,7 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - `.env.example` with DB credential placeholders.
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - Fresh-clone `docker compose up` lands `UP` within 60 s for all services.
 - `/actuator/health` shows `UP` including `binanceStream` and `persistenceQueue`.
 
@@ -258,8 +266,10 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - `QuoteServicePerformanceTest` — 10 k iterations, logs p50/p99; fails only if p99 > 1 ms.
 - `IngestLagTest` — mock WS at 500 msg/s; asserts `binance.quote.lag.millis` p99 < 5 ms.
 - FM-specific tests per `requirement_traceability.md` NFR section.
+- *(Optional, if time permits)* `QuoteRoundTripTest` — verify a `Quote` survives JSON serialization → deserialization → DB INSERT → DB SELECT without `BigDecimal` precision loss (cross-cutting: DD-2 + DD-12).
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - Every SLO row has a test asserting or logging it.
 - Every `FM-*` row maps to a named test method that exists.
 - No `@Disabled` / `@Ignore`d tests.
@@ -279,6 +289,7 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - Final `mvn clean verify` green.
 
 **Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
 - A reader new to the repo can go from clone to working `curl /api/quotes` in 5 minutes.
 - README links into `docs/` instead of duplicating.
 - Commit log reads as a narrative; no `wip` / `fix fix` noise.

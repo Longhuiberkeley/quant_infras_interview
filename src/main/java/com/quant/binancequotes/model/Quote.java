@@ -16,15 +16,15 @@ import java.time.Instant;
  * Both are milliseconds since epoch and come from the USDT-M Perpetuals {@code @bookTicker} stream
  * (see DD-10).
  *
- * @param symbol          e.g. "BTCUSDT"
- * @param bid             best bid price
- * @param bidSize         best bid quantity
- * @param ask             best ask price
- * @param askSize         best ask quantity
- * @param updateId        Binance order-book update id ({@code u}), monotonic per symbol
- * @param eventTime       Binance event time ({@code E}), ms since epoch
+ * @param symbol e.g. "BTCUSDT"
+ * @param bid best bid price
+ * @param bidSize best bid quantity
+ * @param ask best ask price
+ * @param askSize best ask quantity
+ * @param updateId Binance order-book update id ({@code u}), monotonic per symbol
+ * @param eventTime Binance event time ({@code E}), ms since epoch
  * @param transactionTime Binance transaction time ({@code T}), ms since epoch
- * @param receivedAt      local clock time when the frame was parsed
+ * @param receivedAt local clock time when the frame was parsed
  */
 public record Quote(
     String symbol,
