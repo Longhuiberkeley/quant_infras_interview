@@ -192,7 +192,7 @@ All 5 SLO rows are validated by tests that measure and assert:
 | Freshness lag p99 < 500 ms | `IngestLagTest#lagGaugeUnder500msAt500rps` |
 | Persistence headroom ≥ 10× | `BatchPersistenceServiceTest#sustains500rps` |
 
-Pre-submission audit: [`docs/audit_results.md`](docs/audit_results.md) (47/47 checks passed, P1–P7).
+Pre-submission audit: [`docs/audit_results.md`](docs/audit_results.md) (68/68 checks passed, P1–P9 + P10a).
 
 ## Project Structure
 

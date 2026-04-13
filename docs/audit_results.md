@@ -19,9 +19,9 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 | P8 | Test Quality & Anti-Cheating | DONE | 8 | — | — |
 | P9 | Operational Readiness | DONE | 4 | — | 2 |
 | P10a | Internal Doc Consistency | DONE | 9 | — | — |
-| P10b | External Doc Consistency (post-Phase 8) | DEFERRED | — | — | — |
+| P10b | External Doc Consistency (post-Phase 8) | DONE | 3 | — | — |
 
-**Overall:** 68 / 68 checks passed (P1–P9, P10a complete; P10b deferred)
+**Overall:** 71 / 71 checks passed (P1–P9, P10a, P10b complete)
 
 ---
 
@@ -32,6 +32,7 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 | 1 | 2026-04-13 | P1–P7 (full evidence gathering + results recording) | Qwen Code | 3 subagents ran research-only checks in parallel; main agent serialized results into this file. P1.2 FAIL fixed: `AppConfigTest` → `AppPropertiesTest` in `requirement_traceability.md`. |
 | 2 | 2026-04-13 | P8, P10a (evidence gathering, results recording, fixups) | Qwen Code | 2 subagents ran P8 and P10a checks in parallel. P8.1 fixed: added assertion to `DevProfileBootTest.contextLoads()`. P10a.7 fixed: added FM-11 body section to `failure_modes.md`. P8.2 informational: 2 mock-only tests in `BatchPersistenceServiceTest` noted but acceptable. |
 | 3 | 2026-04-13 | P9 (operational readiness audit) | Qwen Code | P9.1: `mvn clean verify` — 95 tests, 0 failures, 0 errors, 2 skipped. P9.2: spotless:check green. P9.3: no JPA in dep tree. P9.4/P9.5: DEFERRED (env-gated / post-Phase 8). P9.6: no TODO/FIXME in production code. `batchInsert_survivesRestart` deferred per `docs/restart-test-analysis.md` (Docker Desktop macOS port-mapping limitation). |
+| 4 | 2026-04-13 | P10b (external doc consistency) + README fix | Qwen Code | P10b.1: all 8 README doc links valid. P10b.2: API examples match QuoteController + Quote record. P10b.3: prerequisites match pom.xml. README audit count fixed 47/47 → 68/68. Overall: 71/71. |
 
 ---
 
@@ -491,18 +492,18 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 
 ### P10b.1 README links are valid and point to correct sections
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** PASS
+- **Evidence:** All 8 doc links in README.md resolve to existing files: `docs/interviewer_requirements.md`, `docs/architecture.md`, `docs/design_decisions.md` (referenced twice), `docs/failure_modes.md`, `docs/audit_results.md`, `docs/requirement_traceability.md`, `docs/implementation_plan.md`. All `grep -f` confirmed via `ls` on each target.
+- **Fix (if needed):** N/A
 
 ### P10b.2 README API examples match actual endpoint behavior
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** PASS
+- **Evidence:** README `curl localhost:18080/api/quotes/BTCUSDT` example matches `QuoteController` `@GetMapping("/{symbol}")` — returns a single `Quote` JSON object. `curl localhost:18080/api/quotes` matches `@GetMapping` — returns `Map<String, Quote>` keyed by symbol. JSON field names (`symbol`, `bid`, `bidSize`, `ask`, `askSize`, `updateId`, `eventTime`, `transactionTime`, `receivedAt`) match `Quote` record components exactly. `BigDecimal` fields serialized as plain decimals (confirmed by `WRITE_BIGDECIMAL_AS_PLAIN` in `application.yml`).
+- **Fix (if needed):** N/A
 
 ### P10b.3 README prerequisites match actual project requirements
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** PASS
+- **Evidence:** README states Java 21+ → pom.xml `<java.version>21</java.version>`. README states Maven 3.9+ → Spring Boot 3.3.0 parent requires Maven 3.6+; 3.9.x confirmed installed. README states Docker optional → `application-dev.yml` provides H2 fallback. Docker Compose section correctly marked as "Option A" (not mandatory).
+- **Fix (if needed):** N/A
