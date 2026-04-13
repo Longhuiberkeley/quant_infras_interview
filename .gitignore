@@ -1,0 +1,44 @@
+# Build
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+.factorypath
+.apt_generated/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Other agent CLIs
+.gemini/
+.qwen/
+.claude/
+.opencode/
+
+# Spring Boot dev tools
+HELP.md
+
+# H2 local file (dev profile)
+data/
+*.mv.db
+*.trace.db
