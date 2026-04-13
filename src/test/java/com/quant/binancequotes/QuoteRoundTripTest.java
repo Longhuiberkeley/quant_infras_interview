@@ -2,6 +2,7 @@ package com.quant.binancequotes;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.binancequotes.model.Quote;
 import com.quant.binancequotes.repository.QuoteRepository;
@@ -71,8 +72,9 @@ class QuoteRoundTripTest {
     Quote quote = makeQuote();
     String json = objectMapper.writeValueAsString(quote);
 
-    // Assert no scientific notation
-    assertThat(json).doesNotContain("E");
+    // Assert no scientific notation in numeric fields (robust: works with any symbol)
+    JsonNode node = objectMapper.readTree(json);
+    assertThat(node.get("bid").asText()).doesNotMatch("(?i).*[eE].*");
     assertThat(json).contains("67432.15000001");
 
     Quote deserialized = objectMapper.readValue(json, Quote.class);
@@ -137,7 +139,9 @@ class QuoteRoundTripTest {
     // 4. Serialize again
     String finalJson = objectMapper.writeValueAsString(fromDb);
 
-    assertThat(finalJson).doesNotContain("E");
+    // Assert no scientific notation in numeric fields (robust: works with any symbol)
+    JsonNode finalNode = objectMapper.readTree(finalJson);
+    assertThat(finalNode.get("bid").asText()).doesNotMatch("(?i).*[eE].*");
     assertThat(finalJson).contains("67432.15000001");
     assertThat(fromDb.bid().compareTo(original.bid())).isZero();
   }

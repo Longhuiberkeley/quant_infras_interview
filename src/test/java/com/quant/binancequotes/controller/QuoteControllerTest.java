@@ -209,12 +209,11 @@ class QuoteControllerTest {
 
     org.slf4j.LoggerFactory.getLogger(QuoteControllerTest.class)
         .info(
-            "REST GET /api/quotes latency — iterations: {}, p50: {:.2f} ms, p99: {:.2f} ms,"
-                + " max: {:.2f} ms",
+            "REST GET /api/quotes latency — iterations: {}, p50: {} ms, p99: {} ms, max: {} ms",
             iterations,
-            p50Ms,
-            p99Ms,
-            maxMs);
+            String.format("%.2f", p50Ms),
+            String.format("%.2f", p99Ms),
+            String.format("%.2f", maxMs));
 
     assertThat(p99Ms)
         .as("p99 REST latency should be under 5 ms (was %.2f ms)", p99Ms)

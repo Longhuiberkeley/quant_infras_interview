@@ -19,8 +19,9 @@ import org.springframework.stereotype.Component;
  * {@code a}, {@code A}) to the {@code Quote} record fields.
  *
  * <p>Validates business invariants before construction (DD-13): positive prices, non-negative
- * sizes, non-crossed spread ({@code bid <= ask}), and plausible timestamps. Invalid messages are
- * logged at {@code WARN} and return {@link Optional#empty()}.
+ * sizes, non-crossed spread ({@code bid <= ask}), positive {@code updateId}, plausible timestamps
+ * ({@code eventTime}, {@code transactionTime}), and non-negative {@code transactionTime}. Invalid
+ * messages are logged at {@code WARN} and return {@link Optional#empty()}.
  *
  * <p>Subscription acknowledgment frames (e.g. {@code {"result":null,"id":1}}) are silently skipped.
  *
@@ -127,6 +128,17 @@ public class QuoteMessageParser {
     }
     if (eventTime <= 0) {
       log.warn("Zero or negative eventTime — skipping: symbol={}, eventTime={}", symbol, eventTime);
+      return Optional.empty();
+    }
+    if (updateId <= 0) {
+      log.warn("Zero or negative updateId — skipping: symbol={}, updateId={}", symbol, updateId);
+      return Optional.empty();
+    }
+    if (transactionTime < 0) {
+      log.warn(
+          "Negative transactionTime — skipping: symbol={}, transactionTime={}",
+          symbol,
+          transactionTime);
       return Optional.empty();
     }
     long now = System.currentTimeMillis();

@@ -313,6 +313,50 @@ class QuoteMessageParserTest {
   // ── Edge cases ─────────────────────────────────────────────────────────────
 
   @Test
+  void negativeUpdateId_returnsEmpty() {
+    String msg =
+        """
+        {
+          "stream": "btcusdt@bookTicker",
+          "data": {
+            "u": -1,
+            "E": 1713456789000,
+            "T": 1713456788997,
+            "s": "BTCUSDT",
+            "b": "50000.00",
+            "B": "1.0",
+            "a": "50001.00",
+            "A": "1.0"
+          }
+        }
+        """;
+
+    assertTrue(parser.parse(msg).isEmpty());
+  }
+
+  @Test
+  void negativeTransactionTime_returnsEmpty() {
+    String msg =
+        """
+        {
+          "stream": "btcusdt@bookTicker",
+          "data": {
+            "u": 1,
+            "E": 1713456789000,
+            "T": -1,
+            "s": "BTCUSDT",
+            "b": "50000.00",
+            "B": "1.0",
+            "a": "50001.00",
+            "A": "1.0"
+          }
+        }
+        """;
+
+    assertTrue(parser.parse(msg).isEmpty());
+  }
+
+  @Test
   void malformedJson_returnsEmpty() {
     assertTrue(parser.parse("{ bad json").isEmpty());
     assertTrue(parser.parse("not json at all").isEmpty());

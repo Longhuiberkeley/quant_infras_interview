@@ -61,7 +61,7 @@ Runs against an in-memory H2 database. WebSocket ingestion still connects to Bin
 mvn clean verify
 ```
 
-Runs Spotless (Google Java Format), compiles, and executes all 90+ tests. All tests are hermetic — no external network or database required.
+Runs Spotless (Google Java Format), compiles, and executes all 95+ tests. All tests are hermetic — no external network or database required.
 
 ## API Endpoints
 
@@ -136,12 +136,14 @@ All configuration lives in `src/main/resources/application.yml`. Environment var
 
 ### Proxy / Binance US Override
 
-To route through a proxy or point at Binance US, set `binance.ws.base-url`:
+To route through a proxy or point at Binance US, override the relevant properties:
 
 ```yaml
 binance:
   ws:
-    base-url: wss://stream.binance.us:9443   # or any proxy
+    base-url: wss://stream.binance.us:9443   # Binance US override
+    proxy-host: proxy.corp                    # optional HTTP proxy
+    proxy-port: 3128
 ```
 
 The stream path (`/stream?streams=...`) is appended automatically.
@@ -192,7 +194,7 @@ All 5 SLO rows are validated by tests that measure and assert:
 | Freshness lag p99 < 500 ms | `IngestLagTest#lagGaugeUnder500msAt500rps` |
 | Persistence headroom ≥ 10× | `BatchPersistenceServiceTest#sustains500rps` |
 
-Pre-submission audit: [`docs/audit_results.md`](docs/audit_results.md) (68/68 checks passed, P1–P9 + P10a).
+Pre-submission audit: [`docs/audit_results.md`](docs/audit_results.md) (71/71 checks passed, P1–P9 + P10a + P10b).
 
 ## Project Structure
 

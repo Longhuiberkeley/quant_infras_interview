@@ -47,7 +47,7 @@ to record vs. what to leave to pass/fail of `mvn verify`). Audit check P10a.10 i
 
 ## 7.2 — Precision & Traceability
 
-- **Commit:** _(pending)_
+- **Commit:** `4aa3901`
 - **Date:** 2026-04-13
 - **`mvn clean verify`:** PASS (78 tests, 0 failures, 0 errors)
 
@@ -104,7 +104,7 @@ Notes:
 
 ## 7.4 — Resilience + Docker Smoke
 
-- **Commit:** _(pending — populated on commit)_
+- **Commit:** `8fa43e1`
 - **Date:** 2026-04-13
 - **`mvn clean verify`:** PASS (96 tests, 0 failures, 0 errors, 2 skipped)
 
@@ -153,5 +153,5 @@ Test duration: ~1.6 s (includes 30 s readiness poll budget; actual PG recovery <
 See [`audit_results.md`](./audit_results.md) for the full pillar-by-pillar audit record.
 This section only flags anything that required a fixup commit to resolve.
 
-- Drift found and corrected: _(pending)_
-- Fixup commit SHA (if any): _(pending)_
+- Drift found and corrected: P1.2 (AppConfigTest → AppPropertiesTest), P8.1 (added assertion), P10a.7 (FM-11 body), README audit count (47→68→71)
+- Fixup commits: `cfce7a3`, `ba4d158`, `936e10a`, `bf28f2d`

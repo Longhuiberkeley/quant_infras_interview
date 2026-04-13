@@ -1,5 +1,6 @@
 package com.quant.binancequotes.config;
 
+import java.net.InetSocketAddress;
 import java.net.Proxy;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -16,8 +17,11 @@ public class BinanceProperties {
   /** Base WebSocket URL, e.g. {@code wss://fstream.binance.com}. */
   private String baseUrl = "wss://fstream.binance.com";
 
-  /** Optional HTTP proxy (e.g. {@code http://proxy.corp:3128}). */
-  private Proxy proxy;
+  /** Optional HTTP proxy host. When set together with {@link #proxyPort}, enables proxying. */
+  private String proxyHost;
+
+  /** Optional HTTP proxy port. */
+  private int proxyPort;
 
   /**
    * Staleness threshold in milliseconds. If no message arrives for a symbol within this window, the
@@ -33,12 +37,20 @@ public class BinanceProperties {
     this.baseUrl = baseUrl;
   }
 
-  public Proxy getProxy() {
-    return proxy;
+  public String getProxyHost() {
+    return proxyHost;
   }
 
-  public void setProxy(Proxy proxy) {
-    this.proxy = proxy;
+  public void setProxyHost(String proxyHost) {
+    this.proxyHost = proxyHost;
+  }
+
+  public int getProxyPort() {
+    return proxyPort;
+  }
+
+  public void setProxyPort(int proxyPort) {
+    this.proxyPort = proxyPort;
   }
 
   public long getStalenessThresholdMs() {
@@ -47,5 +59,16 @@ public class BinanceProperties {
 
   public void setStalenessThresholdMs(long stalenessThresholdMs) {
     this.stalenessThresholdMs = stalenessThresholdMs;
+  }
+
+  /**
+   * Constructs a {@link Proxy} from the configured host and port, or returns {@code null} if no
+   * proxy is configured.
+   */
+  public Proxy toProxy() {
+    if (proxyHost != null && !proxyHost.isBlank() && proxyPort > 0) {
+      return new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort));
+    }
+    return null;
   }
 }

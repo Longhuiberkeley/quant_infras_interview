@@ -73,8 +73,8 @@ public class BinanceWebSocketClient extends WebSocketListener {
 
   // ── Networking ────────────────────────────────────────────────────────────
 
-  private OkHttpClient okHttpClient;
-  private WebSocket webSocket;
+  private volatile OkHttpClient okHttpClient;
+  private volatile WebSocket webSocket;
 
   // ── State flags ───────────────────────────────────────────────────────────
 
@@ -99,8 +99,7 @@ public class BinanceWebSocketClient extends WebSocketListener {
   // ── Lag metrics (DD-11) ──────────────────────────────────────────────────
 
   /** Per-symbol lag values, updated on the hot path with zero allocation. */
-  private final ConcurrentHashMap<String, AtomicLong>
-      lastEventTimeBySymbol; // Fix: Store eventTime instead of static lag for dynamic metrics.
+  private final ConcurrentHashMap<String, AtomicLong> lastEventTimeBySymbol;
 
   /**
    * Constructs the client and registers Micrometer gauges.
@@ -171,8 +170,8 @@ public class BinanceWebSocketClient extends WebSocketListener {
     log.info("Connecting to Binance WebSocket: {}", combinedUrl);
 
     OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder();
-    if (binanceProperties.getProxy() != null) {
-      clientBuilder.proxy(binanceProperties.getProxy());
+    if (binanceProperties.toProxy() != null) {
+      clientBuilder.proxy(binanceProperties.toProxy());
     }
     this.okHttpClient = clientBuilder.build();
 
@@ -185,8 +184,10 @@ public class BinanceWebSocketClient extends WebSocketListener {
    * Graceful shutdown: sets the shuttingDown flag, cancels any pending reconnect, sends a standard
    * 1000 close frame, and awaits {@code onClosed} with a bounded timeout.
    *
-   * <p>Uses {@code @Order(1)} to ensure this runs before {@link BatchPersistenceService#shutdown()}
-   * so the persistence drainer sees a closed input before it flushes.
+   * <p>This bean depends on {@link BatchPersistenceService} via constructor injection. Spring
+   * destroys beans in reverse-initialization order, so this {@code @PreDestroy} runs before the
+   * drainer's. {@code @Order(1)} is kept as a defensive marker but is not the primary ordering
+   * mechanism.
    */
   @PreDestroy
   @Order(1)
@@ -272,7 +273,7 @@ public class BinanceWebSocketClient extends WebSocketListener {
       closedLatch.countDown();
     }
     if (!shuttingDown) {
-      increaseBackoff(); // Fix: Called increaseBackoff to actually enforce backoff.
+      increaseBackoff();
       scheduleReconnect();
     }
   }
@@ -285,7 +286,7 @@ public class BinanceWebSocketClient extends WebSocketListener {
       closedLatch.countDown();
     }
     if (!shuttingDown) {
-      increaseBackoff(); // Fix: Called increaseBackoff to actually enforce backoff.
+      increaseBackoff();
       scheduleReconnect();
     }
   }
@@ -319,7 +320,7 @@ public class BinanceWebSocketClient extends WebSocketListener {
               } catch (Exception e) {
                 log.error("Reconnect attempt failed", e);
                 // If reconnect fails, schedule again
-                increaseBackoff(); // Fix: Called increaseBackoff to actually enforce backoff.
+                increaseBackoff();
                 scheduleReconnect();
               }
             },

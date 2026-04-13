@@ -104,7 +104,6 @@ class IngestLagTest {
         }
         """;
 
-    long eventTimeBase = System.currentTimeMillis();
     int totalMessages = MESSAGES_PER_SECOND * DURATION_SECONDS;
     List<String> symbols =
         List.of(
@@ -123,8 +122,8 @@ class IngestLagTest {
 
     for (int i = 0; i < totalMessages; i++) {
       String symbol = symbols.get(i % symbols.size());
-      // eventTime is always slightly in the past (simulating real network delay of ~10ms)
-      long eventTime = eventTimeBase + (i * 2); // ~500 msgs/sec → 2ms apart
+      // eventTime is always slightly in the past (simulating ~50ms network delay)
+      long eventTime = System.currentTimeMillis() - 50;
       String streamName = symbol.toLowerCase();
       String msg = String.format(template, streamName, i + 1, eventTime, eventTime, symbol);
 
@@ -143,12 +142,11 @@ class IngestLagTest {
     double actualRps = totalMessages / (elapsedMs / 1000.0);
 
     log.info(
-        "Ingest lag test — messages: {}, elapsed: {:.2f} ms, actual rate: {:.0f} msg/s,"
-            + " max lag: {:.2f} ms",
+        "Ingest lag test — messages: {}, elapsed: {} ms, actual rate: {} msg/s, max lag: {} ms",
         totalMessages,
-        elapsedMs,
-        actualRps,
-        maxLag);
+        String.format("%.2f", elapsedMs),
+        String.format("%.0f", actualRps),
+        String.format("%.2f", maxLag));
 
     assertThat(maxLag)
         .as(
