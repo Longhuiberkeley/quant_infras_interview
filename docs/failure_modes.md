@@ -22,9 +22,9 @@ This signals engineering maturity without over-engineering.
 | **Impact** | No new quotes received; stale data served from in-memory map |
 | **Mitigation** | Exponential backoff reconnect (1s → 2s → 4s → … → 60s cap) |
 | **Implemented?** | **Yes** — in `BinanceWebSocketClient.onFailure()` and `onClosed()` |
-| **Verification** | Unit test simulates disconnect, asserts reconnect is scheduled |
+| **Verification** | Unit tests simulate both graceful disconnects and hostile network partitions (abrupt socket closures without close frames), asserting reconnect is scheduled correctly |
 
-### FM-2: Database Temporarily Unavailable
+### FM-2:
 
 | Field | Detail |
 |-------|--------|

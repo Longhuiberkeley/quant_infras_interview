@@ -259,14 +259,15 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 
 ### Phase 7 — Comprehensive Tests (~1.5 h)
 
-**Goal.** Prove every SLO and every FM is covered.
+**Goal.** Prove every SLO and every FM is covered, including hostile network conditions and end-to-end data precision.
 
 **Deliverables.**
 - `ApplicationIntegrationTest` — `@SpringBootTest` with Testcontainers PG + OkHttp `MockWebServer` simulating Binance; verifies frame → map → REST → DB end-to-end and the reconnect scenario.
 - `QuoteServicePerformanceTest` — 10 k iterations, logs p50/p99; fails only if p99 > 1 ms.
 - `IngestLagTest` — mock WS at 500 msg/s; asserts `binance.quote.lag.millis` p99 < 5 ms.
+- `QuoteRoundTripTest` — verify a `Quote` survives JSON serialization → deserialization → DB INSERT → DB SELECT without `BigDecimal` precision loss or scientific notation corruption (cross-cutting: DD-2 + DD-12).
+- **Hostile Network Partition Test** — Explicitly test abrupt socket closure (no graceful close frame) to ensure atomic flags and backoff trigger correctly (e.g., `BinanceWebSocketClientTest#reconnect_afterAbruptSocketClosure`).
 - FM-specific tests per `requirement_traceability.md` NFR section.
-- *(Optional, if time permits)* `QuoteRoundTripTest` — verify a `Quote` survives JSON serialization → deserialization → DB INSERT → DB SELECT without `BigDecimal` precision loss (cross-cutting: DD-2 + DD-12).
 
 **Review before moving on.**
 - **Gate command:** `mvn clean verify` passes.
@@ -274,8 +275,32 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 - Every `FM-*` row maps to a named test method that exists.
 - No `@Disabled` / `@Ignore`d tests.
 - Test run is hermetic (no real Binance, no external DB).
+- `QuoteRoundTripTest` explicitly asserts exact `BigDecimal` scale and unscaled values survive the DB round trip.
 
-**Commit.** `test: end-to-end integration + resilience + perf sanity`.
+**Commit.** `test: end-to-end integration + resilience + perf + precision sanity`.
+
+---
+
+### Phase 7.5 — Audit & Consistency Lock (~30 min)
+
+**Goal.** Verify the codebase, test suite, and documentation are internally consistent before writing final prose. No new production code or tests are produced in this phase.
+
+**Deliverables.**
+- Green `mvn clean verify`.
+- Every test method named in `requirement_traceability.md` exists in the codebase (scripted `grep` check).
+- Every `DD-*` and `FM-*` cross-reference across all docs points to a real entry.
+- `grep -r '@Disabled\|@Ignore' src/test/` returns zero hits.
+- `mvn dependency:tree | grep -i jpa` returns nothing.
+- Spotless passes (`mvn spotless:check`).
+- Commit log reviewed: reads as a clean narrative, no `wip` / `fix fix` / orphan commits.
+- Any drift found is corrected (test rename, stale doc reference, etc.) and committed as a single fixup.
+
+**Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
+- All scripted checks above pass. If any fail, fix and re-run before proceeding to Phase 8.
+- The system is now considered locked: Phase 8 (README, CLAUDE.md) describes this exact state.
+
+**Commit.** `chore: audit lock — verify doc/test/code consistency` (only if drift was corrected; skip commit if everything was already consistent).
 
 ---
 
@@ -310,8 +335,9 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 | 5. REST API | 30 min | 5:30 |
 | 6. Docker & Ops | 1:00 | 6:30 |
 | 7. Tests | 1:30 | 8:00 |
-| 8. README & CLAUDE.md | 1:00 | 9:00 |
-| **Total** | **~9 h** | (inside a 1-day window) |
+| 7.5. Audit & Lock | 20–30 min | 8:30 |
+| 8. README & CLAUDE.md | 1:00 | 9:30 |
+| **Total** | **~9.5 h** | (inside a 1-day window) |
 
 Buffer: ~3 h for unexpected issues.
 

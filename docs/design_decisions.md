@@ -32,7 +32,7 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 - *`double` / `DOUBLE PRECISION`.* Rejected: precision loss on every deserialization. Aggregations accumulate error.
 - *`long` with fixed-point encoding (e.g. cents × 10⁸).* Rejected for this project: a defensible choice for a real HFT path — no GC, no allocation — but overkill at 50 msg/s and needlessly obscures the code.
 
-**Consequences.** `BigDecimal` math is slower than `double` and produces short-lived allocations. At our rate (~50 msg/s, burst 500) this is invisible in profiles. Comparisons must use `compareTo`, not `equals` (which distinguishes `"1.0"` from `"1.00"`). Documented in the code where comparisons live.
+**Consequences.** `BigDecimal` math is slower than `double` and produces short-lived allocations. At our rate (~50 msg/s, burst 500) this is invisible in profiles. Comparisons must use `compareTo`, not `equals` (which distinguishes `"1.0"` from `"1.00"`). Documented in the code where comparisons live. The `QuoteRoundTripTest` explicitly guarantees that precision loss is structurally prevented across the JSON → DB → JSON lifecycle.
 
 ---
 

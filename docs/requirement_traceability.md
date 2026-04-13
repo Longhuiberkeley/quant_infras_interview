@@ -104,6 +104,7 @@ Maps each interviewer requirement → design decision → implementation module 
 | `QuoteRepositoryIntegrationTest` | Integration (Testcontainers) | REQ-4 |
 | `QuoteServicePerformanceTest` | Performance | REQ-6 |
 | `ApplicationIntegrationTest` | Integration (@SpringBootTest) | REQ-1 through REQ-5 end-to-end |
+| `QuoteRoundTripTest` | Integration (Testcontainers) | REQ-3, REQ-4 precision integrity |
 
 ## Coverage by Requirement
 
@@ -125,7 +126,7 @@ Maps each failure mode from [`failure_modes.md`](./failure_modes.md) to the miti
 
 | FM ID | Failure Mode | Mitigation Module | Test(s) Proving Mitigation |
 |-------|--------------|-------------------|----------------------------|
-| FM-1 | WebSocket disconnect | `BinanceWebSocketClient` — exponential backoff reconnect with atomic in-flight guard | `BinanceWebSocketClientTest#reconnect_schedulesOnce_underStormOfClosures`, `BinanceWebSocketClientTest#backoffProgression`, `ApplicationIntegrationTest#reconnectAfterNetworkDrop` |
+| FM-1 | WebSocket disconnect | `BinanceWebSocketClient` — exponential backoff reconnect with atomic in-flight guard | `BinanceWebSocketClientTest#reconnect_schedulesOnce_underStormOfClosures`, `BinanceWebSocketClientTest#reconnect_afterAbruptSocketClosure`, `ApplicationIntegrationTest#reconnectAfterNetworkDrop` |
 | FM-2 | DB temporarily unavailable | `BatchPersistenceService` — bounded queue absorbs burst + capped exponential retry | `BatchPersistenceServiceTest#retriesOnTransientSqlFailure`, `QuoteRepositoryIntegrationTest#batchInsert_survivesRestart` |
 | FM-3 | Malformed JSON message | `QuoteMessageParser` — try/catch, log raw, skip | `QuoteMessageParserTest#malformedJson_returnsEmpty`, `QuoteMessageParserTest#subscriptionAckFrame_returnsEmpty` |
 | FM-4 | High message burst (backpressure) | `BatchPersistenceService` — non-blocking `offer` with drop-oldest above 90% depth | `BatchPersistenceServiceTest#dropOldest_whenQueueAboveThreshold`, `BatchPersistenceServiceTest#producerNeverBlocks` |
