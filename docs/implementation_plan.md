@@ -22,6 +22,7 @@ binance-quote-service/
 │   ├── implementation_plan.md       (this file)
 │   ├── audit_checklist.md           (Phase 7.5: structured pre-submission audit)
 │   ├── audit_results.md             (Phase 7.5: execution record)
+│   ├── phase7_results.md            (Phase 7.1–7.4: evidence capture, per-phase)
 │   └── journal.md                   (development log)
 │
 ├── src/
@@ -64,13 +65,18 @@ binance-quote-service/
 │   └── test/
 │       └── java/com/quant/binancequotes/
 │           ├── model/QuoteTest.java
-│           ├── config/AppPropertiesTest.java
+│           ├── config/{AppPropertiesTest, AppPropertiesIntegrationTest}.java
 │           ├── websocket/{QuoteMessageParserTest, BinanceWebSocketClientTest}.java
-│           ├── service/{QuoteServiceTest, BatchPersistenceServiceTest, QuoteServicePerformanceTest}.java
+│           ├── service/{QuoteServiceTest, BatchPersistenceServiceTest,
+│           │              QuoteServicePerformanceTest}.java
 │           ├── repository/QuoteRepositoryIntegrationTest.java  (Testcontainers)
 │           ├── controller/QuoteControllerTest.java
 │           ├── IngestLagTest.java
-│           └── ApplicationIntegrationTest.java                 (@SpringBootTest + MockWebServer)
+│           ├── QuoteRoundTripTest.java                         (JSON → DB precision)
+│           ├── ApplicationIntegrationTest.java                 (@SpringBootTest + MockWebServer)
+│           ├── DockerComposeSmokeTest.java                     (Docker Compose sanity)
+│           └── health/{BinanceStreamHealthIndicatorTest,
+│                         PersistenceQueueHealthIndicatorTest}.java
 │
 ├── docker-compose.yml
 ├── Dockerfile
@@ -260,27 +266,113 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 
 ---
 
-### Phase 7 — Comprehensive Tests (~1.5 h)
+### Phase 7.1 — Integration Happy Path (~45 min)
 
-**Goal.** Prove every SLO and every FM is covered, including hostile network conditions and end-to-end data precision.
+**Goal.** Prove the system works end-to-end: WebSocket frame → in-memory map → REST → DB. This is the single most important test of the project — if the plumbing is broken, nothing else matters.
 
 **Deliverables.**
-- `ApplicationIntegrationTest` — `@SpringBootTest` with Testcontainers PG + OkHttp `MockWebServer` simulating Binance; verifies frame → map → REST → DB end-to-end and the reconnect scenario.
-- `QuoteServicePerformanceTest` — 10 k iterations, logs p50/p99; fails only if p99 > 1 ms.
-- `IngestLagTest` — mock WS at 500 msg/s; asserts `binance.quote.lag.millis` p99 < 5 ms.
-- `QuoteRoundTripTest` — verify a `Quote` survives JSON serialization → deserialization → DB INSERT → DB SELECT without `BigDecimal` precision loss or scientific notation corruption (cross-cutting: DD-2 + DD-12).
-- **Hostile Network Partition Test** — Explicitly test abrupt socket closure (no graceful close frame) to ensure atomic flags and backoff trigger correctly (e.g., `BinanceWebSocketClientTest#reconnect_afterAbruptSocketClosure`).
-- FM-specific tests per `requirement_traceability.md` NFR section.
+- `ApplicationIntegrationTest` — `@SpringBootTest` with Testcontainers PG + OkHttp `MockWebServer` simulating Binance.
+  - Happy path: send mock `@bookTicker` frames for all 10 symbols → verify data appears in `QuoteService` map → verify `/api/quotes` returns all 10 via MockMvc → verify rows landed in PostgreSQL via raw JDBC `SELECT COUNT(*)`.
+  - `ingestLatencyUnder5ms` — measure `System.nanoTime()` between MockWebServer enqueue and `QuoteService.get(symbol).map(Quote::updateId)` returning the expected value; run 1 000 iterations; log p50/p99; fail if p99 > 5 ms. Fulfils the SLO row in `requirement_traceability.md:153`.
+  - Reconnect after network drop: enqueue `new MockResponse().withSocketPolicy(DISCONNECT_AFTER_REQUEST)` on a long-lived `MockWebServer` → verify reconnect counter increments → enqueue valid frames → verify map repopulates. (No port reuse — the server stays up; only the socket is severed.)
+  - Dev profile boot: `@SpringBootTest` with `dev` profile, no PostgreSQL container → verify application context loads successfully.
 
 **Review before moving on.**
 - **Gate command:** `mvn clean verify` passes.
-- Every SLO row has a test asserting or logging it.
-- Every `FM-*` row maps to a named test method that exists.
-- No `@Disabled` / `@Ignore`d tests.
-- Test run is hermetic (no real Binance, no external DB).
-- `QuoteRoundTripTest` explicitly asserts exact `BigDecimal` scale and unscaled values survive the DB round trip.
+- Happy path test asserts data in all 3 sinks (map, REST response body, DB row count).
+- Reconnect test verifies data flow resumes after reconnection (not just that reconnect was scheduled).
+- Dev profile test asserts successful context load.
+- No real Binance connection; no external DB. Fully hermetic.
 
-**Commit.** `test: end-to-end integration + resilience + perf + precision sanity`.
+**Commit.** `test(7.1): full-stack integration test with mock WebSocket`.
+
+**Parallelisation.** This phase creates `ApplicationIntegrationTest.java` (new file). No existing files are modified. Safe to run in parallel with Phase 7.2.
+
+---
+
+### Phase 7.2 — Precision & Traceability Fix (~35 min)
+
+**Goal.** Guarantee `BigDecimal` survives the full pipeline; fix naming drift between traceability docs and actual test method names.
+
+**Deliverables.**
+- `QuoteRoundTripTest` — Testcontainers PG integration test. Construct a `Quote` with 8-decimal-place `BigDecimal` values (e.g., `new BigDecimal("0.00000001")`). Stages asserted:
+  1. Jackson serialize → deserialize: assert `scale()` and `unscaledValue()` preserved, no scientific notation in JSON string.
+  2. INSERT to PostgreSQL via `QuoteRepository.batchInsert` → SELECT back: assert `BigDecimal` exact equality after DB round-trip.
+  3. Combined: serialize → deserialize → INSERT → SELECT → serialize: assert end-to-end precision.
+- Update `requirement_traceability.md` — rename the following method references to match actual code:
+
+  | Old (doc) | New (actual) |
+  |-----------|-------------|
+  | `QuoteMessageParserTest#eventTimePreserved` | `QuoteMessageParserTest#eventTimeAndTransactionTime_mappedFromEAndT` |
+  | `QuoteServiceTest#monotonicByUpdateId` | `QuoteServiceTest#newerUpdateIdReplacesOlder` (covers same contract) |
+  | `QuoteRepositoryIntegrationTest#duplicateUpdateId_isIgnored` | `QuoteRepositoryIntegrationTest#duplicateSymbolUpdateIdIsSilentlyIgnored` |
+  | `BatchPersistenceServiceTest#dropOldest_whenQueueAboveThreshold` | `BatchPersistenceServiceTest#dropOldestFiresWhenQueueOverflows` |
+  | `BatchPersistenceServiceTest#shutdownFlushesQueue` | `BatchPersistenceServiceTest#shutdownDrainsRemainingQueue` |
+  | `BatchPersistenceServiceTest#retriesOnTransientSqlFailure` | `BatchPersistenceServiceTest#retryOneByOneOnBatchFailure` |
+  | `QuoteMessageParserTest#zeroPrice_returnsEmpty` | `QuoteMessageParserTest#zeroPrice_bid_returnsEmpty` + `#zeroPrice_ask_returnsEmpty` |
+
+- Update `failure_modes.md` — rename 1 method reference in FM-5 (`duplicateUpdateId_isIgnored` → `duplicateSymbolUpdateIdIsSilentlyIgnored`).
+
+**Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
+- `QuoteRoundTripTest` asserts `BigDecimal.scale()`, `BigDecimal.unscaledValue()`, and plain-decimal string form at each boundary (JSON, DB).
+- Every `Test#methodName` in `requirement_traceability.md` resolves to an actual method in `src/test/` (run `rg "Test#" docs/requirement_traceability.md` and verify each).
+- No `1E-8` or scientific notation in any serialized JSON output.
+
+**Commit.** `test(7.2): BigDecimal precision round-trip + fix traceability naming drift`.
+
+**Parallelisation.** This phase creates `QuoteRoundTripTest.java` (new file) and edits doc files. No overlap with Phase 7.1 or 7.3 test files. Safe to run in parallel with Phase 7.1.
+
+---
+
+### Phase 7.3 — Performance & SLO Validation (~30 min)
+
+**Goal.** Empirically prove every SLO with a test that measures and asserts. "Performance is a top priority" is REQ-6 — these tests must exist.
+
+**Deliverables.**
+- `QuoteServicePerformanceTest` — populate `ConcurrentHashMap` with 10 quotes; run 10 000 reads per symbol; log p50/p99; fail if p99 > 1 ms.
+- `IngestLagTest` — pump 500 mock messages/sec through `BinanceWebSocketClient` with frozen clock; assert `binance.quote.lag.max.millis` gauge stays under 500 ms at steady state.
+- `QuoteControllerTest#p99LatencyUnder5ms` — add method to existing class; 1 000 MockMvc calls to `GET /api/quotes`; log p99; fail if > 5 ms.
+- Unit tests for both health indicators:
+  - `BinanceStreamHealthIndicatorTest` — verify `UP` when connected + recent message; `DOWN` when disconnected or stale.
+  - `PersistenceQueueHealthIndicatorTest` — verify `UP` when queue depth < 90%; `DOWN` when queue depth ≥ 90%.
+
+**Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
+- All 5 SLO rows in `architecture.md` §8 map to a test method that runs and passes.
+- Performance thresholds are logged (not just asserted) so p50/p99 numbers are visible in CI output.
+- Health indicator tests verify both `UP` and `DOWN` states.
+- `QuoteServicePerformanceTest` uses `System.nanoTime()` (not `currentTimeMillis()`) for sub-millisecond precision.
+
+**Commit.** `test(7.3): SLO validation — performance, lag, health indicators`.
+
+**Parallelisation.** This phase creates 2 new files and adds 1 method to `QuoteControllerTest`. No overlap with Phase 7.1 or 7.2 files. Safe to run in parallel with Phases 7.1 and 7.2 (but should run before 7.4 since 7.4's Docker test depends on the full suite being green).
+
+---
+
+### Phase 7.4 — Resilience Edge Cases + Docker Smoke (~30 min)
+
+**Goal.** Prove failure-mode mitigations work under hostile conditions; verify the Docker Compose stack starts healthy.
+
+**Deliverables.**
+- `BinanceWebSocketClientTest#reconnect_afterAbruptSocketClosure` — simulate code 1006 abnormal closure (no close frame sent); assert `reconnecting` CAS succeeds, backoff timer is scheduled, and no graceful-shutdown path is triggered.
+- `BatchPersistenceServiceTest#producerNeverBlocks` — flood `enqueue()` from 8 threads simultaneously while drainer is paused; measure per-call `offer()` latency via `System.nanoTime()`; log p50/p99 and assert p99 < 50 ms (tighter thresholds like 10 ms are flaky under virtual-thread scheduler jitter; the point is to prove non-blocking behaviour, not fixed-latency behaviour).
+- `BatchPersistenceServiceTest#shutdownTimeoutRespected` — block the drainer thread; enqueue items; call `@PreDestroy` with 200 ms timeout; assert partial drain occurred and method returned within 2× the timeout.
+- `BatchPersistenceServiceTest#sustains500rps` — pump 500 quotes/sec for 5 seconds (2 500 total) into a queue draining at batch-size 50; assert all items eventually persisted.
+- `QuoteRepositoryIntegrationTest#batchInsert_survivesRestart` — insert 10 rows; stop PostgreSQL container; restart container; insert 10 more rows; assert 20 rows total via `SELECT COUNT(*)`.
+- `DockerComposeSmokeTest` — use Testcontainers' `ComposeContainer` (v2 Compose API; `DockerComposeContainer` is deprecated in Testcontainers ≥1.19) to start `docker-compose.yml`; wait for app health check; assert `/actuator/health` returns `{"status":"UP"}`; assert `/api/quotes` returns 200. Guard with `@EnabledIfEnvironmentVariable(named = "DOCKER_AVAILABLE", matches = "true")` or `@DisabledInNativeImage` so CI without Docker can skip.
+
+**Review before moving on.**
+- **Gate command:** `mvn clean verify` passes.
+- Every `FM-*` row in `requirement_traceability.md` NFR table maps to a named test method that exists and passes.
+- Abrupt closure test distinguishes from graceful close (code 1006 vs 1000).
+- DB restart test uses real Testcontainers stop/start — not a mock.
+- Docker smoke test passes locally (manual: `docker compose up` → `curl /actuator/health`).
+- No `@Disabled` / `@Ignore`d tests without an environment guard.
+
+**Commit.** `test(7.4): resilience edge cases — abrupt closure, DB restart, Docker smoke`.
+
+**Parallelisation.** This phase adds methods to 3 existing test files and creates 1 new file. It should run **after** Phases 7.1–7.3 so that the base test suite is green and the Docker smoke can validate the complete set.
 
 ---
 
@@ -321,6 +413,8 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 
 **Commit.** `chore: audit lock — verify doc/test/code consistency` (only if drift was corrected; skip commit if everything was already consistent).
 
+**Parallelisation.** Must be sequential — it audits the output of Phases 7.1–7.4.
+
 ---
 
 ### Phase 8 — README, CLAUDE.md, Polish (~1 h)
@@ -344,21 +438,37 @@ Each phase lists its **goal**, **deliverables**, **review gate** (what to verify
 
 ## 4. Timeline
 
-| Phase | Duration | Cumulative |
-|-------|----------|-----------|
-| 0. Bootstrap | 30 min | 0:30 |
-| 1. Model & Schema | 30 min | 1:00 |
-| 2. QuoteService | 30 min | 1:30 |
-| 3. Persistence | 1:30 | 3:00 |
-| 4. WebSocket Ingestion | 2:00 | 5:00 |
-| 5. REST API | 30 min | 5:30 |
-| 6. Docker & Ops | 1:00 | 6:30 |
-| 7. Tests | 1:30 | 8:00 |
-| 7.5. Audit & Lock | 20–30 min | 8:30 |
-| 8. README & CLAUDE.md | 1:00 | 9:30 |
-| **Total** | **~9.5 h** | (inside a 1-day window) |
+| Phase | Duration | Cumulative | Parallelisable? |
+|-------|----------|-----------|----------------|
+| 0. Bootstrap | 30 min | 0:30 | — |
+| 1. Model & Schema | 30 min | 1:00 | — |
+| 2. QuoteService | 30 min | 1:30 | — |
+| 3. Persistence | 1:30 | 3:00 | — |
+| 4. WebSocket Ingestion | 2:00 | 5:00 | — |
+| 5. REST API | 30 min | 5:30 | — |
+| 6. Docker & Ops | 1:00 | 6:30 | — |
+| 7.1. Integration | 45 min | 7:15 | Yes — with 7.2, 7.3 |
+| 7.2. Precision | 35 min | 7:50 | Yes — with 7.1, 7.3 |
+| 7.3. Performance | 30 min | 8:20 | Yes — with 7.1, 7.2 |
+| 7.4. Resilience + Docker | 30 min | 8:50 | After 7.1–7.3 |
+| 7.5. Audit & Lock | 20–30 min | 9:20 | Sequential only |
+| 8. README & CLAUDE.md | 1:00 | 10:20 | — |
+| **Total (sequential)** | **~10.5 h** | (inside a 1-day window) |
+| **Total (parallelised)** | **~9 h** | (7.1+7.2+7.3 concurrent) | |
 
 Buffer: ~3 h for unexpected issues.
+
+**Parallelisation strategy for Phase 7:**
+
+```
+7.1 ──┐
+7.2 ──┤──→ merge + verify ──→ 7.4 ──→ 7.5 ──→ 8
+7.3 ──┘
+```
+
+Phases 7.1, 7.2, and 7.3 touch completely disjoint files (no overlap in test classes or docs). They can be launched as 3 concurrent agent sessions. Merge order does not matter. Phase 7.4 modifies existing test files and should run after the merge to avoid conflicts. Phase 7.5 audits everything and must be last.
+
+**Phase 7 evidence capture.** `docs/phase7_results.md` is created as a stub in the 7.1 commit and filled incrementally — each 7.* commit updates its own section. Capture evidence only where pass/fail hides signal: perf p50/p99 numbers (7.3), integration counts + reconnect counters (7.1), resilience before/after state (7.4). Pure unit-test pass/fail is covered by green `mvn verify` and does not need a results entry. 7.3 perf tests use a JUnit 5 `@AfterAll` hook that appends one markdown row to `target/phase7-metrics.md`; the reviewed block is copied into `docs/phase7_results.md` as part of the 7.3 commit. Audit check P10a.* in `audit_checklist.md` verifies all four phase sections are filled before 7.5 closes.
 
 ## 5. Risk Register
 

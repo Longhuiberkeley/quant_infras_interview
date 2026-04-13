@@ -350,7 +350,25 @@ Interviewer REQ → Design Decision (DD) → Code Module → Test → Audit Chec
 - **Command:** `rg "private static\s+(?!final)" src/main/`
 - **Pass:** Zero matches. (The only exception is static constants like `SYMBOL_PATTERN` in `AppProperties`, which are `static final`.)
 
-### P4.12 `record` used for pure data carriers, not classes with getters
+### P4.12 No unused private methods (dead code)
+
+| Trace | Reference |
+|-------|-----------|
+| **REQ** | REQ-7 (code quality) |
+
+- **Check:** Every `private` method in production code is called by at least one other method. Dead code is misleading, increases review surface, and often indicates incomplete refactoring.
+- **Command (ast-grep):**
+  ```bash
+  for method in $(rg "private\s+\w+\s+\w+\(" src/main/ -o | sed 's/.*\s//; s/(//'); do
+    count=$(rg "$method" src/main/ -c | awk -F: '{s+=$2}END{print s}')
+    if [ "$count" -le 1 ]; then echo "DEAD: $method"; fi
+  done
+  ```
+- **Command (simpler):** `rg "private\s+(void|String|BigDecimal|boolean|long|int|Optional|Map|List)" src/main/ -o --no-filename | sed 's/.*\s//' | while read m; do c=$(rg "$m" src/main/ -c | awk -F: '{s+=$2}END{print s}'); if [ "$c" -le 1 ]; then echo "UNUSED: $m"; fi; done`
+- **Exclusions:** `@PostConstruct`, `@PreDestroy`, `@Override`, `health()`, `hashCode()`, `toString()`, `equals()` — these are framework/lifecycle callbacks or record-generated.
+- **Pass:** Zero unused private methods (excluding framework callbacks).
+
+### P4.13 `record` used for pure data carriers, not classes with getters
 
 | Trace | Reference |
 |-------|-----------|
@@ -669,6 +687,27 @@ Interviewer REQ → Design Decision (DD) → Code Module → Test → Audit Chec
 - **Command:** `rg "Thread.sleep" src/test/ -l` → for each file, determine if it's unit or integration.
 - **Pass:** `Thread.sleep` only in tests where timing is explicitly under test (e.g., batch flush interval). No arbitrary `sleep(1000)` to "wait for things to settle."
 
+### P8.9 No significant code duplication (production)
+
+| Trace | Reference |
+|-------|-----------|
+| **REQ** | REQ-7 (code quality) |
+
+- **Check:** No duplicated logic in production code — identical or near-identical blocks of ≥6 lines. Duplication increases bug-surface (fix one copy, miss the other) and signals a missing abstraction.
+- **Command (ast-grep — structural):**
+  ```bash
+  ast-grep --pattern 'if ($COND) { $$$BODY } else if ($COND2) { $$$BODY }' --language java src/main/
+  ```
+- **Command (heuristic — repeated 6+ line blocks):**
+  ```bash
+  for f in $(find src/main -name "*.java"); do
+    # Look for repeated identical 6-line blocks within the same file
+    awk 'NF{buf=buf"\n"$0} NR%6==0{print buf; buf=""}' "$f" | sort | uniq -d
+  done
+  ```
+- **Exclusions:** Test fixture builders (`makeQuote` / `sampleQuote`) are covered by P8.5. Constructor injection boilerplate (repeated `this.x = x` patterns) is acceptable.
+- **Pass:** Zero duplicated blocks of ≥6 lines across production code. If duplication is found, extract a shared method.
+
 ---
 
 ## P9. Operational Readiness
@@ -827,6 +866,17 @@ Interviewer REQ → Design Decision (DD) → Code Module → Test → Audit Chec
 - **Command:** `rg "JdbcClient" docs/` → verify references are accurate or explained.
 - **Pass:** All doc descriptions match implementation, or discrepancies are explicitly noted.
 
+### P10a.10 `phase7_results.md` evidence sections all populated
+
+| Trace | Reference |
+|-------|-----------|
+| **IP** | Phases 7.1–7.4 |
+
+- **Check:** `docs/phase7_results.md` exists and contains non-empty content under each of the four phase headings (`## 7.1`, `## 7.2`, `## 7.3`, `## 7.4`). Empty stubs (e.g., ellipses, `TBD`, or "pending") fail this check — by the time P10a runs, every phase must have recorded its evidence.
+- **Command:** `rg -A 3 "^## 7\.[1-4]" docs/phase7_results.md` → for each section, verify at least one non-placeholder line follows.
+- **Command (placeholder scan):** `rg -i "tbd|pending|\\.\\.\\.$" docs/phase7_results.md` → should be empty (or only inside fenced code examples).
+- **Pass:** Every 7.1–7.4 section has real evidence (counts, p50/p99 numbers, before/after values) — no placeholders.
+
 ---
 
 ### P10b — External Doc Consistency (After Phase 8)
@@ -885,3 +935,5 @@ Useful patterns for this audit:
 | `$OPT.get()` on Optional | Unguarded Optional.get |
 | `catch (Exception $E) { $$$ }` without rethrow/log | Swallowed exception |
 | `$MAP.get($K); ... $MAP.put($K, $V)` | TOCTOU race on map |
+| `private $RET $METHOD($$$ARGS) { $$$ }` where `$METHOD` appears only once in codebase | Dead / unused private method (P4.12) |
+| `if ($A) { $$$BODY } else { $$$BODY }` where BODY blocks are structurally identical | Duplicated branches (P8.9) |
