@@ -13,34 +13,35 @@ to record vs. what to leave to pass/fail of `mvn verify`). Audit check P10a.10 i
 ## 7.1 — Integration Happy Path
 
 - **Commit:** _(pending — will be filled by 7.1 commit)_
-- **Date:** _(pending)_
-- **`mvn clean verify`:** _(pending)_
+- **Date:** 2026-04-13
+- **`mvn clean verify`:** PASS (75 tests, 0 failures, 0 errors)
 
 ### Happy path assertions
 
 | Sink | Expected | Observed |
 |------|----------|----------|
-| `QuoteService.all().size()` | 10 | _(pending)_ |
-| `/api/quotes` response array length | 10 | _(pending)_ |
-| `SELECT COUNT(*) FROM quotes` | ≥ 10 | _(pending)_ |
+| `QuoteService.all().size()` | 10 | 10 |
+| `/api/quotes` response array length | 10 | 10 |
+| `SELECT COUNT(*) FROM quotes` | ≥ 10 | 10 |
 
 ### `ingestLatencyUnder5ms` (SLO)
 
 | Metric | Target | Observed |
 |--------|--------|----------|
-| p50 | — | _(pending)_ |
-| p99 | < 5 ms | _(pending)_ |
-| iterations | 1 000 | _(pending)_ |
+| p50 | — | 95.46 µs |
+| p99 | < 5 ms | 566.08 µs |
+| iterations | 1 000 | 1 000 |
 
 ### Reconnect after socket disconnect
 
-- Reconnect-counter before disconnect: _(pending)_
-- Reconnect-counter after disconnect: _(pending)_ (should increment by 1)
-- Map repopulation after reconnect: _(pending)_
+- Reconnect-counter before disconnect: 1 (initial WS upgrade during `@PostConstruct`)
+- Reconnect-counter after disconnect: 2 (Δ = 1 — a new HTTP upgrade request was issued)
+- Map repopulation after reconnect: 10 / 10 symbols present with post-reconnect prices (bid > 55000, proving frames are from reconnect — not stale Test 1 data)
+- Backoff observed: `onFailure` → `Scheduling reconnect in 2000 ms` → `Attempting reconnect…` → `WebSocket connected` (≈ 2 s from drop to reconnect; within 1→2→4…→60 s policy)
 
 ### Dev-profile boot
 
-- Context loaded without PostgreSQL: _(pending)_
+- Context loaded without PostgreSQL: PASS (`DevProfileBootTest.contextLoads` — 1 test, 0 failures. H2 via `application-dev.yml`; `binance.ws.base-url=ws://localhost:1` produces connection-refused on the WS client but does not fail context refresh.)
 
 ---
 
