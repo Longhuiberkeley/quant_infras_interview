@@ -9,7 +9,7 @@ journaling:
 1840. Finished Phase 6. Refined Phase 7 TODOs quite a bit.
 Rate issues whatnot, and phase 7 takes longer than expected
 2030 to 2110. Dinner. 
-
+2225. Truly at the last step. SPENT TOO MUCHTIME ON ONE TEST that is basically impossible to complete
 
 
 Available tools: 

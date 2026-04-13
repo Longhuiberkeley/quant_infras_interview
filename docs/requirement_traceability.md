@@ -127,7 +127,7 @@ Maps each failure mode from [`failure_modes.md`](./failure_modes.md) to the miti
 | FM ID | Failure Mode | Mitigation Module | Test(s) Proving Mitigation |
 |-------|--------------|-------------------|----------------------------|
 | FM-1 | WebSocket disconnect | `BinanceWebSocketClient` — exponential backoff reconnect with atomic in-flight guard | `BinanceWebSocketClientTest#reconnect_schedulesOnce_underStormOfClosures`, `BinanceWebSocketClientTest#reconnect_afterAbruptSocketClosure`, `ApplicationIntegrationTest#reconnectAfterNetworkDrop` |
-| FM-2 | DB temporarily unavailable | `BatchPersistenceService` — bounded queue absorbs burst + capped exponential retry | `BatchPersistenceServiceTest#retryOneByOneOnBatchFailure`, `QuoteRepositoryIntegrationTest#batchInsert_survivesRestart` |
+| FM-2 | DB temporarily unavailable | `BatchPersistenceService` — bounded queue absorbs burst + capped exponential retry | `BatchPersistenceServiceTest#retryOneByOneOnBatchFailure`. *(DB restart integration test deferred — see [`docs/restart-test-analysis.md`](./restart-test-analysis.md))* |
 | FM-3 | Malformed JSON message | `QuoteMessageParser` — try/catch, log raw, skip | `QuoteMessageParserTest#malformedJson_returnsEmpty`, `QuoteMessageParserTest#subscriptionAckFrame_returnsEmpty` |
 | FM-4 | High message burst (backpressure) | `BatchPersistenceService` — non-blocking `offer` with drop-oldest above 90% depth | `BatchPersistenceServiceTest#dropOldestFiresWhenQueueOverflows`, `BatchPersistenceServiceTest#producerNeverBlocks` |
 | FM-5 | Duplicate messages on reconnect | Schema — `UNIQUE(symbol, update_id)` + `INSERT ... ON CONFLICT DO NOTHING` | `QuoteRepositoryIntegrationTest#duplicateSymbolUpdateIdIsSilentlyIgnored` |

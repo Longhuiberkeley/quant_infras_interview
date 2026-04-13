@@ -17,11 +17,11 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 | P6 | Spring Boot & Lifecycle | DONE | 6 | — | — |
 | P7 | Security | DONE | 4 | — | — |
 | P8 | Test Quality & Anti-Cheating | DONE | 8 | — | — |
-| P9 | Operational Readiness | DEFERRED | — | — | — |
+| P9 | Operational Readiness | DONE | 4 | — | 2 |
 | P10a | Internal Doc Consistency | DONE | 9 | — | — |
 | P10b | External Doc Consistency (post-Phase 8) | DEFERRED | — | — | — |
 
-**Overall:** 64 / 64 checks passed (P1–P8, P10a complete; P9, P10b deferred)
+**Overall:** 68 / 68 checks passed (P1–P9, P10a complete; P10b deferred)
 
 ---
 
@@ -31,6 +31,7 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 |---|------|----------------|-------|-------|
 | 1 | 2026-04-13 | P1–P7 (full evidence gathering + results recording) | Qwen Code | 3 subagents ran research-only checks in parallel; main agent serialized results into this file. P1.2 FAIL fixed: `AppConfigTest` → `AppPropertiesTest` in `requirement_traceability.md`. |
 | 2 | 2026-04-13 | P8, P10a (evidence gathering, results recording, fixups) | Qwen Code | 2 subagents ran P8 and P10a checks in parallel. P8.1 fixed: added assertion to `DevProfileBootTest.contextLoads()`. P10a.7 fixed: added FM-11 body section to `failure_modes.md`. P8.2 informational: 2 mock-only tests in `BatchPersistenceServiceTest` noted but acceptable. |
+| 3 | 2026-04-13 | P9 (operational readiness audit) | Qwen Code | P9.1: `mvn clean verify` — 95 tests, 0 failures, 0 errors, 2 skipped. P9.2: spotless:check green. P9.3: no JPA in dep tree. P9.4/P9.5: DEFERRED (env-gated / post-Phase 8). P9.6: no TODO/FIXME in production code. `batchInsert_survivesRestart` deferred per `docs/restart-test-analysis.md` (Docker Desktop macOS port-mapping limitation). |
 
 ---
 
@@ -392,7 +393,7 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 ### P8.8 `Thread.sleep` in unit tests flagged for flakiness risk
 
 - **Result:** PASS
-- **Evidence:** All 11 `Thread.sleep` calls confined to two files: `BatchPersistenceServiceTest` (10 calls — tests flush/drain timing, unavoidable for timed drainer behavior) and `QuoteRepositoryIntegrationTest` (1 call — `waitForPgDirect` polling). No pure logic unit tests (`QuoteMessageParserTest`, `QuoteServiceTest`, `QuoteControllerTest`) use `Thread.sleep`.
+- **Evidence:** All 10 `Thread.sleep` calls confined to `BatchPersistenceServiceTest` (10 calls — tests flush/drain timing, unavoidable for timed drainer behavior). No pure logic unit tests (`QuoteMessageParserTest`, `QuoteServiceTest`, `QuoteControllerTest`) use `Thread.sleep`. The `batchInsert_survivesRestart` test (which previously had `Thread.sleep` for PG readiness polling) has been deferred per `docs/restart-test-analysis.md`.
 - **Fix (if needed):** None.
 
 ---
@@ -401,39 +402,39 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 
 ### P9.1 `mvn clean verify` passes
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** PASS
+- **Evidence:** `mvn clean verify --batch-mode` — Tests run: 95, Failures: 0, Errors: 0, Skipped: 2. BUILD SUCCESS. JAR and repackaged Spring Boot artifact produced. spotless:check executed and passed as part of verify lifecycle.
+- **Fix (if needed):** N/A
 
 ### P9.2 `mvn spotless:check` passes
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** PASS
+- **Evidence:** `mvn spotless:check --batch-mode` — "Spotless.Java is keeping 30 files clean - 0 needs changes to be clean. Spotless.Pom is keeping 1 files clean - 0 needs changes to be clean." BUILD SUCCESS.
+- **Fix (if needed):** N/A
 
 ### P9.3 No JPA in dependency tree
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** PASS
+- **Evidence:** `mvn dependency:tree | grep -i jpa` returned zero matches. No JPA/Hibernate dependencies present. Consistent with DD-1 (no JPA).
+- **Fix (if needed):** N/A
 
 ### P9.4 Docker Compose starts healthy (when implemented)
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** DEFERRED
+- **Evidence:** Environment-gated — requires `docker compose up` with live PostgreSQL container and Binance WS connectivity. Deferred until after Phase 8 when the full end-to-end deployment is exercised.
+- **Fix (if needed):** N/A — will be validated during Phase 8 deployment testing.
 
 ### P9.5 README build/run/test instructions are accurate
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** DEFERRED
+- **Evidence:** Requires manual verification of README.md build/run/test instructions against the current project state. Deferred until after Phase 8 when all documentation is finalized.
+- **Fix (if needed):** N/A — will be validated during Phase 8 documentation review.
 
 ### P9.6 No `TODO` / `FIXME` in production code without tracking note
 
-- **Result:**
-- **Evidence:**
-- **Fix (if needed):**
+- **Result:** PASS
+- **Evidence:** `rg "TODO|FIXME" src/main/` returned zero matches. No untracked TODO or FIXME annotations in production code.
+- **Fix (if needed):** N/A
 
 ---
 
