@@ -100,7 +100,7 @@ Maps each interviewer requirement → design decision → implementation module 
 | `BatchPersistenceServiceTest` | Unit | REQ-4 |
 | `BinanceWebSocketClientTest` | Unit | REQ-1 |
 | `QuoteControllerTest` | Unit (@WebMvcTest) | REQ-5 |
-| `AppConfigTest` | Unit | REQ-2 |
+| `AppPropertiesTest` | Unit | REQ-2 |
 | `QuoteRepositoryIntegrationTest` | Integration (Testcontainers) | REQ-4 |
 | `QuoteServicePerformanceTest` | Performance | REQ-6 |
 | `ApplicationIntegrationTest` | Integration (@SpringBootTest) | REQ-1 through REQ-5 end-to-end |
