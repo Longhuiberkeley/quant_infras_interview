@@ -177,6 +177,50 @@ class QuoteControllerTest {
         .andExpect(jsonPath("$.exception").doesNotExist());
   }
 
+  // --- SLO: REST p99 < 5 ms ---
+
+  @Test
+  void p99LatencyUnder5ms() throws Exception {
+    // Populate the service with all 10 symbols
+    Map<String, Quote> allQuotes = new java.util.HashMap<>();
+    for (String symbol : appProperties.getSymbols()) {
+      Quote q = testQuote(symbol, 1);
+      allQuotes.put(symbol, q);
+    }
+    when(quoteService.all()).thenReturn(Map.copyOf(allQuotes));
+
+    int iterations = 1_000;
+    long[] latencies = new long[iterations];
+
+    for (int i = 0; i < iterations; i++) {
+      long start = System.nanoTime();
+      mockMvc.perform(get("/api/quotes")).andExpect(status().isOk());
+      latencies[i] = System.nanoTime() - start;
+    }
+
+    java.util.Arrays.sort(latencies);
+    long p50 = latencies[iterations / 2];
+    long p99 = latencies[(int) (iterations * 0.99)];
+    long max = latencies[iterations - 1];
+
+    double p50Ms = p50 / 1_000_000.0;
+    double p99Ms = p99 / 1_000_000.0;
+    double maxMs = max / 1_000_000.0;
+
+    org.slf4j.LoggerFactory.getLogger(QuoteControllerTest.class)
+        .info(
+            "REST GET /api/quotes latency — iterations: {}, p50: {:.2f} ms, p99: {:.2f} ms,"
+                + " max: {:.2f} ms",
+            iterations,
+            p50Ms,
+            p99Ms,
+            maxMs);
+
+    assertThat(p99Ms)
+        .as("p99 REST latency should be under 5 ms (was %.2f ms)", p99Ms)
+        .isLessThan(5.0);
+  }
+
   // --- Helpers ---
 
   private Quote testQuote(String symbol, long updateId) {
