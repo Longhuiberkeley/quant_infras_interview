@@ -27,7 +27,6 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okio.ByteString;
 import org.awaitility.Awaitility;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -106,28 +105,27 @@ class ApplicationIntegrationTest {
         .withWebSocketUpgrade(
             new WebSocketListener() {
               @Override
-              public void onOpen(@NotNull WebSocket webSocket, @NotNull Response response) {
+              public void onOpen(WebSocket webSocket, Response response) {
                 serverWebSocket.set(webSocket);
               }
 
               @Override
-              public void onMessage(@NotNull WebSocket ws, @NotNull String text) {
+              public void onMessage(WebSocket ws, String text) {
                 // Client doesn't send app-level messages.
               }
 
               @Override
-              public void onMessage(@NotNull WebSocket ws, @NotNull ByteString bytes) {
+              public void onMessage(WebSocket ws, ByteString bytes) {
                 // ignore
               }
 
               @Override
-              public void onClosed(@NotNull WebSocket ws, int code, @NotNull String reason) {
+              public void onClosed(WebSocket ws, int code, String reason) {
                 // ignore
               }
 
               @Override
-              public void onFailure(
-                  @NotNull WebSocket ws, @NotNull Throwable t, Response response) {
+              public void onFailure(WebSocket ws, Throwable t, Response response) {
                 // ignore
               }
             });
@@ -312,7 +310,9 @@ class ApplicationIntegrationTest {
     // graceful close() is not deterministic under load; cancelling from the client side
     // is the cleanest way to trigger the production reconnect path.
     serverWebSocket.set(null);
-    WebSocket clientWs = wsClient.getWebSocket();
+    WebSocket clientWs =
+        (WebSocket)
+            org.springframework.test.util.ReflectionTestUtils.getField(wsClient, "webSocket");
     assertThat(clientWs).as("client-side WebSocket must be live").isNotNull();
     clientWs.cancel();
 

@@ -127,19 +127,38 @@ class BinanceWebSocketClientTest {
   }
 
   @Test
+  void reconnect_noDuplicate_whenLateCallbackDuringReconnect() {
+    WebSocket oldSocket = mock(WebSocket.class);
+
+    // First failure sets reconnecting flag via CAS
+    client.onFailure(oldSocket, new RuntimeException("fail"), mockResponse);
+    assertTrue(client.isReconnecting(), "First onFailure should set reconnecting");
+
+    // Late onClosed from the same old socket arrives while reconnect is in-flight.
+    // Before the fix, onClosed cleared reconnecting, allowing scheduleReconnect()
+    // CAS to succeed again (duplicate). After the fix, onClosed does not clear
+    // the flag, so scheduleReconnect's CAS(false→true) fails.
+    client.onClosed(oldSocket, 1006, "late callback");
+    assertTrue(
+        client.isReconnecting(),
+        "Late onClosed must NOT clear the reconnecting flag during active reconnect");
+
+    // Another late onFailure should also not duplicate
+    client.onFailure(oldSocket, new RuntimeException("late fail"), mockResponse);
+    assertTrue(
+        client.isReconnecting(),
+        "Late onFailure must NOT clear the reconnecting flag during active reconnect");
+  }
+
+  @Test
   void reconnect_flagReset_afterReconnectAttempt() throws Exception {
     // First failure schedules a reconnect
     client.onFailure(mockWebSocket, new RuntimeException("network error"), mockResponse);
     assertTrue(client.isReconnecting());
 
-    // Simulate the reconnect task running: it resets the flag
-    // Cancel any pending scheduled task by shutting down and recreating is not needed;
-    // we verify the flag behavior directly by resetting it via the reconnect mechanism
-
-    // Manually trigger what the reconnect task does
-    // (in real code, the scheduled task calls reconnecting.set(false) before connecting)
-    // We verify the flag can be reset by simulating a successful reconnect scenario
-    // by calling onOpen which happens after a successful reconnect
+    // Simulate the reconnect task running: the flag is reset
+    // Verify the flag behavior directly by simulating a successful reconnect
+    // via onOpen — which is where reconnecting.set(false) actually happens
     client.onOpen(mockWebSocket, mockResponse);
 
     // After onOpen, a new onFailure should be able to schedule again
@@ -191,6 +210,63 @@ class BinanceWebSocketClientTest {
         1_000L,
         client.getCurrentBackoffMs(),
         "Backoff should reset to 1s after first valid message");
+  }
+
+  @Test
+  void backoffDoesNotReset_onSubsequentMessages() {
+    // Increase backoff via failure
+    client.onFailure(mockWebSocket, new RuntimeException("fail"), mockResponse);
+    assertEquals(2000L, client.getCurrentBackoffMs());
+
+    // Open and send first message — resets backoff
+    client.onOpen(mockWebSocket, mockResponse);
+    String validMsg =
+        """
+        {
+          "stream": "btcusdt@bookTicker",
+          "data": {
+            "u": 1,
+            "E": %d,
+            "T": 1713456788997,
+            "s": "BTCUSDT",
+            "b": "50000.00",
+            "B": "1.0",
+            "a": "50001.00",
+            "A": "1.0"
+          }
+        }
+        """
+            .formatted(System.currentTimeMillis() - 100);
+    client.onMessage(mockWebSocket, validMsg);
+    assertEquals(1_000L, client.getCurrentBackoffMs());
+
+    // Increase backoff again
+    client.onFailure(mockWebSocket, new RuntimeException("fail2"), mockResponse);
+    long increasedBackoff = client.getCurrentBackoffMs();
+    assertTrue(increasedBackoff > 1_000L, "Backoff should have increased: " + increasedBackoff);
+
+    // Open again
+    client.onOpen(mockWebSocket, mockResponse);
+
+    // Send second message — should NOT reset backoff (awaitingFirstMessage was set
+    // by onOpen, but this time we verify the flag is properly cleared after first msg)
+    // To test the "no reset on subsequent" path we send a message after onOpen but
+    // with the flag cleared by a previous message, then fail again to increase backoff,
+    // then send another message without a fresh onOpen.
+    client.onMessage(mockWebSocket, validMsg);
+    assertEquals(1_000L, client.getCurrentBackoffMs(), "First message after open resets backoff");
+
+    // Now increase backoff WITHOUT an onOpen, then send a message
+    client.onFailure(mockWebSocket, new RuntimeException("fail3"), mockResponse);
+    long backoffBeforeMsg = client.getCurrentBackoffMs();
+    assertTrue(backoffBeforeMsg > 1_000L);
+
+    // Sending a message when awaitingFirstMessage is false should NOT reset
+    client.onMessage(mockWebSocket, validMsg);
+    assertEquals(
+        backoffBeforeMsg,
+        client.getCurrentBackoffMs(),
+        "Subsequent messages must NOT reset backoff");
   }
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
@@ -322,6 +398,14 @@ class BinanceWebSocketClientTest {
   }
 
   // ── Lag gauge update ──────────────────────────────────────────────────────
+
+  @Test
+  void lagGauge_returnsNaNWhenNoData() {
+    var maxLagGauge = meterRegistry.find("binance.quote.lag.max.millis").gauge();
+    assertTrue(
+        Double.isNaN(maxLagGauge.value()),
+        "Fleet-max lag gauge should report NaN before any messages arrive");
+  }
 
   @Test
   void lagGauge_updatedOnMessage() {

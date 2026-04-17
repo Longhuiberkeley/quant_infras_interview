@@ -21,19 +21,15 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class QuoteRepository {
 
-  private static final String SQL =
-      """
-      INSERT INTO quotes (symbol, bid_price, bid_size, ask_price, ask_size,
-                          update_id, event_time, transaction_time, received_at)
-      VALUES (:symbol, :bid, :bidSize, :ask, :askSize,
-              :updateId, :eventTime, :transactionTime, :receivedAt)
-      ON CONFLICT (symbol, update_id) DO NOTHING
-      """;
-
   private final NamedParameterJdbcTemplate jdbcTemplate;
+  private final String insertSql;
 
-  public QuoteRepository(NamedParameterJdbcTemplate jdbcTemplate) {
+  public QuoteRepository(
+      NamedParameterJdbcTemplate jdbcTemplate,
+      @org.springframework.beans.factory.annotation.Value("${persistence.insert-sql}")
+          String insertSql) {
     this.jdbcTemplate = jdbcTemplate;
+    this.insertSql = insertSql;
   }
 
   /**
@@ -65,11 +61,13 @@ public class QuoteRepository {
                             "receivedAt", Timestamp.from(q.receivedAt()))))
             .toArray(SqlParameterSource[]::new);
 
-    int[] results = jdbcTemplate.batchUpdate(SQL, batch);
+    int[] results = jdbcTemplate.batchUpdate(insertSql, batch);
     int inserted = 0;
     for (int r : results) {
       if (r > 0) {
         inserted += r;
+      } else if (r == java.sql.Statement.SUCCESS_NO_INFO) {
+        inserted += 1;
       }
     }
     return inserted;

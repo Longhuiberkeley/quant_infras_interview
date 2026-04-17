@@ -120,6 +120,8 @@ class IngestLagTest {
 
     long startNs = System.nanoTime();
 
+    okhttp3.WebSocket mockWebSocket = mock(okhttp3.WebSocket.class);
+
     for (int i = 0; i < totalMessages; i++) {
       String symbol = symbols.get(i % symbols.size());
       // eventTime is always slightly in the past (simulating ~50ms network delay)
@@ -127,7 +129,7 @@ class IngestLagTest {
       String streamName = symbol.toLowerCase();
       String msg = String.format(template, streamName, i + 1, eventTime, eventTime, symbol);
 
-      client.onMessage(null, msg);
+      client.onMessage(mockWebSocket, msg);
     }
 
     long elapsedNs = System.nanoTime() - startNs;

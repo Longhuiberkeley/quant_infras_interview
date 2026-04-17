@@ -22,10 +22,8 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 /**
@@ -39,10 +37,11 @@ import org.springframework.stereotype.Component;
  * message</em> post-open — not on {@code onOpen} itself. This prevents a fast-reconnect /
  * immediate-close loop from exhausting the backoff sequence.
  *
- * <p><b>Graceful shutdown:</b> {@link #shutdown()} ({@code @PreDestroy}, {@code @Order(1)}) sets
- * {@code shuttingDown = true}, cancels any pending reconnect, sends a standard 1000 close frame,
- * and awaits {@code onClosed} with a bounded timeout (3 s). This runs before {@link
+ * <p><b>Graceful shutdown:</b> {@link #shutdown()} ({@code @PreDestroy}) sets {@code shuttingDown =
+ * true}, cancels any pending reconnect, sends a standard 1000 close frame, and awaits {@code
+ * onClosed} with a bounded timeout (3 s). This runs before {@link
  * BatchPersistenceService#shutdown()} so the drainer sees a closed input before flushing.
+ * Destruction order is guaranteed by Spring's reverse-initialization-order semantics.
  *
  * @see <a href="docs/design_decisions.md">DD-6, DD-9, DD-10, DD-11</a>
  */
@@ -87,8 +86,12 @@ public class BinanceWebSocketClient extends WebSocketListener {
   /** True between onOpen and onClosed — used by the health indicator. */
   private volatile boolean connected = false;
 
+  /** True between onOpen and the first valid message. */
+  private volatile boolean awaitingFirstMessage = false;
+
   /** Latch awaited by shutdown() after sending close frame. */
-  private volatile java.util.concurrent.CountDownLatch closedLatch;
+  private final java.util.concurrent.atomic.AtomicReference<java.util.concurrent.CountDownLatch>
+      closedLatch = new java.util.concurrent.atomic.AtomicReference<>();
 
   // ── Backoff state ─────────────────────────────────────────────────────────
 
@@ -129,7 +132,7 @@ public class BinanceWebSocketClient extends WebSocketListener {
               lastEventTimeBySymbol,
               m -> {
                 long last = m.get(symbol).get();
-                return last == 0L ? 0L : System.currentTimeMillis() - last;
+                return last == 0L ? Double.NaN : System.currentTimeMillis() - last;
               })
           .tag("symbol", symbol)
           .register(meterRegistry);
@@ -139,13 +142,16 @@ public class BinanceWebSocketClient extends WebSocketListener {
     Gauge.builder(
             "binance.quote.lag.max.millis",
             lastEventTimeBySymbol,
-            m ->
-                m.values().stream()
-                    .mapToLong(AtomicLong::get)
-                    .filter(t -> t > 0L)
-                    .map(t -> System.currentTimeMillis() - t)
-                    .max()
-                    .orElse(0L))
+            m -> {
+              long maxLag =
+                  m.values().stream()
+                      .mapToLong(AtomicLong::get)
+                      .filter(t -> t > 0L)
+                      .map(t -> System.currentTimeMillis() - t)
+                      .max()
+                      .orElse(-1L);
+              return maxLag == -1L ? Double.NaN : (double) maxLag;
+            })
         .register(meterRegistry);
 
     // Scheduler for reconnect backoff (single-threaded, only used for scheduling retries)
@@ -176,7 +182,7 @@ public class BinanceWebSocketClient extends WebSocketListener {
     this.okHttpClient = clientBuilder.build();
 
     Request request = new Request.Builder().url(combinedUrl).build();
-    closedLatch = new java.util.concurrent.CountDownLatch(1);
+    closedLatch.set(new java.util.concurrent.CountDownLatch(1));
     this.webSocket = okHttpClient.newWebSocket(request, this);
   }
 
@@ -186,11 +192,9 @@ public class BinanceWebSocketClient extends WebSocketListener {
    *
    * <p>This bean depends on {@link BatchPersistenceService} via constructor injection. Spring
    * destroys beans in reverse-initialization order, so this {@code @PreDestroy} runs before the
-   * drainer's. {@code @Order(1)} is kept as a defensive marker but is not the primary ordering
-   * mechanism.
+   * drainer's.
    */
   @PreDestroy
-  @Order(1)
   public void shutdown() {
     log.info("Initiating WebSocket shutdown…");
     shuttingDown = true;
@@ -208,7 +212,7 @@ public class BinanceWebSocketClient extends WebSocketListener {
     }
 
     // Await onClosed callback
-    java.util.concurrent.CountDownLatch latch = closedLatch;
+    java.util.concurrent.CountDownLatch latch = closedLatch.get();
     if (latch != null) {
       try {
         boolean awaited = latch.await(SHUTDOWN_ON_CLOSED_TIMEOUT_MS, TimeUnit.MILLISECONDS);
@@ -232,14 +236,18 @@ public class BinanceWebSocketClient extends WebSocketListener {
   // ── WebSocketListener callbacks ───────────────────────────────────────────
 
   @Override
-  public void onOpen(@NotNull WebSocket webSocket, @NotNull Response response) {
+  public void onOpen(WebSocket webSocket, Response response) {
+    if (this.webSocket != null && webSocket != this.webSocket) {
+      return;
+    }
     log.info("WebSocket connected — {}", response.request().url());
     connected = true;
-    // Do NOT reset backoff here — reset only after first inbound message
+    awaitingFirstMessage = true;
+    reconnecting.set(false);
   }
 
   @Override
-  public void onMessage(@NotNull WebSocket webSocket, @NotNull String text) {
+  public void onMessage(WebSocket webSocket, String text) {
     // Parse the message
     var maybeQuote = parser.parse(text);
     if (maybeQuote.isEmpty()) {
@@ -247,8 +255,10 @@ public class BinanceWebSocketClient extends WebSocketListener {
     }
     Quote quote = maybeQuote.get();
 
-    // Reset backoff on first valid message post-open
-    currentBackoffMs = MIN_BACKOFF_MS;
+    if (awaitingFirstMessage) {
+      awaitingFirstMessage = false;
+      currentBackoffMs = MIN_BACKOFF_MS;
+    }
 
     // Update last event time for dynamic lag gauge
     lastEventTimeBySymbol
@@ -261,16 +271,20 @@ public class BinanceWebSocketClient extends WebSocketListener {
   }
 
   @Override
-  public void onMessage(@NotNull WebSocket webSocket, @NotNull ByteString bytes) {
+  public void onMessage(WebSocket webSocket, ByteString bytes) {
     log.warn("Received binary message — ignoring (expected text only)");
   }
 
   @Override
-  public void onClosed(@NotNull WebSocket webSocket, int code, @NotNull String reason) {
+  public void onClosed(WebSocket webSocket, int code, String reason) {
+    if (this.webSocket != null && webSocket != this.webSocket) {
+      return;
+    }
     log.info("WebSocket closed — code={}, reason={}", code, reason);
     connected = false;
-    if (closedLatch != null) {
-      closedLatch.countDown();
+    java.util.concurrent.CountDownLatch latch = closedLatch.get();
+    if (latch != null) {
+      latch.countDown();
     }
     if (!shuttingDown) {
       increaseBackoff();
@@ -279,11 +293,15 @@ public class BinanceWebSocketClient extends WebSocketListener {
   }
 
   @Override
-  public void onFailure(@NotNull WebSocket webSocket, @NotNull Throwable t, Response response) {
+  public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+    if (this.webSocket != null && webSocket != this.webSocket) {
+      return;
+    }
     log.warn("WebSocket failure — {}", response != null ? response.request().url() : "unknown", t);
     connected = false;
-    if (closedLatch != null) {
-      closedLatch.countDown();
+    java.util.concurrent.CountDownLatch latch = closedLatch.get();
+    if (latch != null) {
+      latch.countDown();
     }
     if (!shuttingDown) {
       increaseBackoff();
@@ -309,17 +327,19 @@ public class BinanceWebSocketClient extends WebSocketListener {
         scheduler.schedule(
             () -> {
               try {
-                reconnecting.set(false);
                 if (!shuttingDown) {
                   log.info("Attempting reconnect…");
+                  this.webSocket = null;
                   String combinedUrl = buildCombinedStreamUrl();
                   Request request = new Request.Builder().url(combinedUrl).build();
-                  closedLatch = new java.util.concurrent.CountDownLatch(1);
+                  closedLatch.set(new java.util.concurrent.CountDownLatch(1));
                   webSocket = okHttpClient.newWebSocket(request, this);
+                } else {
+                  reconnecting.set(false);
                 }
               } catch (Exception e) {
                 log.error("Reconnect attempt failed", e);
-                // If reconnect fails, schedule again
+                reconnecting.set(false);
                 increaseBackoff();
                 scheduleReconnect();
               }
@@ -389,17 +409,17 @@ public class BinanceWebSocketClient extends WebSocketListener {
   }
 
   /** Exposes the OkHttpClient for test inspection. */
-  public OkHttpClient getOkHttpClient() {
+  OkHttpClient getOkHttpClient() {
     return okHttpClient;
   }
 
   /** Exposes the WebSocket for test inspection. */
-  public WebSocket getWebSocket() {
+  WebSocket getWebSocket() {
     return webSocket;
   }
 
   /** Exposes the closed latch for test inspection. */
-  public java.util.concurrent.CountDownLatch getClosedLatch() {
-    return closedLatch;
+  java.util.concurrent.CountDownLatch getClosedLatch() {
+    return closedLatch.get();
   }
 }

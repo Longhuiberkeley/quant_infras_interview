@@ -1,17 +1,18 @@
 # Stage 1 — Build
-FROM eclipse-temurin:21-jdk AS build
-RUN apt-get update && apt-get install -y --no-install-recommends maven && rm -rf /var/lib/apt/lists/*
+FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
 COPY pom.xml .
+RUN mvn -B dependency:go-offline
 COPY src ./src
-RUN mvn clean package -DskipTests -q
+RUN mvn -B clean package -DskipTests
 
 # Stage 2 — Run
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-RUN useradd --create-home --shell /bin/bash appuser
-COPY --from=build /build/target/binance-quote-service-0.1.0-SNAPSHOT.jar app.jar
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash appuser
+COPY --from=build /build/target/binance-quote-service-*.jar app.jar
 USER appuser
-ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+ENV JDK_JAVA_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 EXPOSE 18080
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar"]

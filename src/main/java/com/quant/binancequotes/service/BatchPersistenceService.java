@@ -38,6 +38,7 @@ public class BatchPersistenceService {
   private final long flushMs;
   private final int dropOldestAt;
   private final long shutdownTimeoutMs;
+  private final int queueCapacity;
   private final AtomicLong droppedCount = new AtomicLong(0);
   private volatile boolean shuttingDown = false;
   private Thread drainerThread;
@@ -47,8 +48,9 @@ public class BatchPersistenceService {
     this.batchSize = props.getBatchSize();
     this.flushMs = props.getFlushMs();
     this.shutdownTimeoutMs = props.getShutdownTimeoutMs();
-    this.queue = new LinkedBlockingQueue<>(props.getQueueCapacity());
-    this.dropOldestAt = (int) (props.getQueueCapacity() * props.getDropOldestThreshold());
+    this.queueCapacity = props.getQueueCapacity();
+    this.queue = new LinkedBlockingQueue<>(this.queueCapacity);
+    this.dropOldestAt = (int) (this.queueCapacity * props.getDropOldestThreshold());
 
     this.drainerThread = Thread.ofVirtual().name("quote-batch-writer").start(this::drainLoop);
   }
@@ -72,7 +74,7 @@ public class BatchPersistenceService {
         droppedCount.incrementAndGet();
         log.warn(
             "Persistence queue full (capacity={}). Dropped oldest: {}. Total dropped: {}",
-            queue.remainingCapacity() + queue.size(),
+            queueCapacity,
             dropped.symbol(),
             droppedCount.get());
       }
@@ -85,9 +87,7 @@ public class BatchPersistenceService {
       log.warn(
           "Persistence queue at {}% capacity ({} / {}). Drop-oldest backpressure will fire on next"
               + " overflow.",
-          (queue.size() * 100) / (queue.remainingCapacity() + queue.size()),
-          queue.size(),
-          queue.remainingCapacity() + queue.size());
+          (queue.size() * 100) / queueCapacity, queue.size(), queueCapacity);
     }
   }
 
@@ -114,6 +114,7 @@ public class BatchPersistenceService {
   public void shutdown() {
     log.info("Initiating persistence shutdown — draining {} queued quotes…", queue.size());
     shuttingDown = true;
+    drainerThread.interrupt();
     try {
       drainerThread.join(shutdownTimeoutMs);
       log.info(
@@ -163,6 +164,9 @@ public class BatchPersistenceService {
   }
 
   private void flush(List<Quote> batch) {
+    // Clear interrupt flag around JDBC so the shutdown interrupt doesn't corrupt the connection.
+    // The flag is restored in the finally block so the drainLoop catch sees it next iteration.
+    boolean interrupted = Thread.interrupted();
     try {
       int inserted = quoteRepository.batchInsert(batch);
       log.debug("Persisted {}/{} quotes", inserted, batch.size());
@@ -170,6 +174,8 @@ public class BatchPersistenceService {
       log.error("Failed to persist batch of {}. Will retry individually.", batch.size(), e);
       // Capped retry: try one-by-one so a single bad row doesn't kill the whole batch
       retryOneByOne(batch);
+    } finally {
+      if (interrupted) Thread.currentThread().interrupt();
     }
   }
 
