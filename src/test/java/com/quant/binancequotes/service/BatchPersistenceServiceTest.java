@@ -7,8 +7,8 @@ import static org.mockito.Mockito.*;
 import com.quant.binancequotes.config.PersistenceProperties;
 import com.quant.binancequotes.model.Quote;
 import com.quant.binancequotes.repository.QuoteRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -36,7 +36,7 @@ class BatchPersistenceServiceTest {
         updateId,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 
   private PersistenceProperties smallProps() {
@@ -53,13 +53,14 @@ class BatchPersistenceServiceTest {
   private void startService(PersistenceProperties props) {
     mockRepo = mock(QuoteRepository.class);
     when(mockRepo.batchInsert(anyList())).thenReturn(0);
-    service = new BatchPersistenceService(props, mockRepo);
+    service = new BatchPersistenceService(props, mockRepo, new SimpleMeterRegistry());
+    service.startDrainer();
   }
 
-  /** Start service with a pre-configured mock (for tests that need custom stubs). */
   private void startServiceWithMock(QuoteRepository repo, PersistenceProperties props) {
     mockRepo = repo;
-    service = new BatchPersistenceService(props, mockRepo);
+    service = new BatchPersistenceService(props, mockRepo, new SimpleMeterRegistry());
+    service.startDrainer();
   }
 
   @AfterEach
@@ -168,7 +169,8 @@ class BatchPersistenceServiceTest {
     Thread t = service.drainerThread();
     assertNotNull(t, "Drainer thread should exist");
     assertEquals("quote-batch-writer", t.getName());
-    assertTrue(t.isVirtual(), "Drainer should be a virtual thread");
+    assertTrue(t.isAlive(), "Drainer thread should be running");
+    assertFalse(t.isVirtual(), "Drainer should be a platform thread");
   }
 
   @Test

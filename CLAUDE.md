@@ -68,7 +68,7 @@ Installed versions: `21.0.6-tem` (Java), `3.9.14` (Maven).
 ## Architecture invariants
 
 - `Quote` is an immutable `record` with `BigDecimal` monetary fields and both `eventTime` (Binance) and `receivedAt` (local).
-- The batch drainer runs on a single virtual thread named `quote-batch-writer`. `@PreDestroy` drains the queue with a bounded timeout.
+- The batch drainer runs on a single platform thread named `quote-batch-writer`, started via `@PostConstruct`. `@PreDestroy` drains the queue with a bounded timeout.
 - `UNIQUE(symbol, update_id)` + `ON CONFLICT DO NOTHING` handles replay-after-reconnect dedup.
 - `BinanceStreamHealthIndicator` and `PersistenceQueueHealthIndicator` feed `/actuator/health`; orchestration relies on them.
 - `binance.quote.lag.millis` (Micrometer gauge) = `now − eventTime`. It's the single number that tells you real-time correctness.

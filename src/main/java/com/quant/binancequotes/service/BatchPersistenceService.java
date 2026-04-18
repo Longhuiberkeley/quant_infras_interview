@@ -3,19 +3,21 @@ package com.quant.binancequotes.service;
 import com.quant.binancequotes.config.PersistenceProperties;
 import com.quant.binancequotes.model.Quote;
 import com.quant.binancequotes.repository.QuoteRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
  * Async batched persistence service that drains a bounded {@link LinkedBlockingQueue} of {@link
- * Quote}s on a single named virtual thread and flushes them to PostgreSQL in batches.
+ * Quote}s on a single named platform thread and flushes them to PostgreSQL in batches.
  *
  * <p><b>Backpressure:</b> when the queue exceeds {@code dropOldestThreshold * queueCapacity}, the
  * oldest entry is silently discarded and a {@code WARN} is logged. This is non-blocking {@code
@@ -39,11 +41,12 @@ public class BatchPersistenceService {
   private final int dropOldestAt;
   private final long shutdownTimeoutMs;
   private final int queueCapacity;
-  private final AtomicLong droppedCount = new AtomicLong(0);
+  private final Counter droppedCounter;
   private volatile boolean shuttingDown = false;
   private Thread drainerThread;
 
-  public BatchPersistenceService(PersistenceProperties props, QuoteRepository quoteRepository) {
+  public BatchPersistenceService(
+      PersistenceProperties props, QuoteRepository quoteRepository, MeterRegistry meterRegistry) {
     this.quoteRepository = quoteRepository;
     this.batchSize = props.getBatchSize();
     this.flushMs = props.getFlushMs();
@@ -51,8 +54,12 @@ public class BatchPersistenceService {
     this.queueCapacity = props.getQueueCapacity();
     this.queue = new LinkedBlockingQueue<>(this.queueCapacity);
     this.dropOldestAt = (int) (this.queueCapacity * props.getDropOldestThreshold());
+    this.droppedCounter = meterRegistry.counter("binance.quotes.dropped.total");
+  }
 
-    this.drainerThread = Thread.ofVirtual().name("quote-batch-writer").start(this::drainLoop);
+  @PostConstruct
+  void startDrainer() {
+    this.drainerThread = Thread.ofPlatform().name("quote-batch-writer").start(this::drainLoop);
   }
 
   /**
@@ -71,12 +78,12 @@ public class BatchPersistenceService {
       // Queue full — drop oldest (backpressure)
       Quote dropped = queue.poll();
       if (dropped != null) {
-        droppedCount.incrementAndGet();
+        droppedCounter.increment();
         log.warn(
             "Persistence queue full (capacity={}). Dropped oldest: {}. Total dropped: {}",
             queueCapacity,
             dropped.symbol(),
-            droppedCount.get());
+            droppedCounter.count());
       }
       // Retry the offer now that space was freed
       boolean retryOk = queue.offer(quote);
@@ -98,7 +105,7 @@ public class BatchPersistenceService {
 
   /** Returns total number of quotes dropped due to backpressure. */
   public long droppedCount() {
-    return droppedCount.get();
+    return (long) droppedCounter.count();
   }
 
   /** Returns the drainer thread (for observability / testing). */
@@ -120,7 +127,7 @@ public class BatchPersistenceService {
       log.info(
           "Persistence drainer stopped. Remaining in queue: {}. Total dropped: {}",
           queue.size(),
-          droppedCount.get());
+          droppedCounter.count());
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       log.warn("Interrupted while waiting for persistence drainer to stop");

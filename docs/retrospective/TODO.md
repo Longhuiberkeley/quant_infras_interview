@@ -32,6 +32,7 @@ This document synthesizes feedback from the interviewer, automated AI reviews (C
 - [dev-done] **(MUST) Fix Virtual Thread Misuse on Drainer:** `BatchPersistenceService#drainerThread` is a single long-lived virtual thread. Virtual threads shine when you have thousands of short-lived I/O-blocking tasks; for one dedicated loop running for the app's lifetime, virtual vs. platform makes no difference. Convert to a platform thread. *(Interviewer #7)*
 - [dev-done] **Move Drainer Thread Start to `@PostConstruct`:** The drainer thread is started in the `BatchPersistenceService` constructor (line 53). If Spring fails to wire a subsequent bean, the thread is orphaned and `shuttingDown` is never set. Move to `@PostConstruct`. *(Claude #8)*
 - [ ] **Enhance Persistence Retry Logic:** On a transient DB outage, `flush` fails and then `retryOneByOne` fires `batchSize x 3` (default 600) failed connection attempts, each blocking the single drainer thread on `Thread.sleep`. Meanwhile the queue fills and drops. Distinguish connection-class exceptions (`SQLTransientConnectionException`, `CannotGetJdbcConnectionException`) from row-level errors; retry the whole batch with capped backoff for the former, per-row retry only for the latter. *(Claude #9)*
+- [ ] **Add Test for Reconnect Exception → Retry with Backoff:** Mock `OkHttpClient.newWebSocket` to throw inside the reconnect task. Verify that backoff increases exponentially and exactly one new reconnect is scheduled (not stacked). Tracks the open gap noted in TODO_VERIFICATION.md item #7. *(Audit gap)*
 
 ---
 

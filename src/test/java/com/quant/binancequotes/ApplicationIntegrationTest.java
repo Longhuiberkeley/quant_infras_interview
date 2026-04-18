@@ -378,7 +378,78 @@ class ApplicationIntegrationTest {
     return true;
   }
 
-  // ── Test 4: Dev-profile boot without PostgreSQL ──────────────────────────
+  // ── Test 4: Tick-to-trade latency (WS frame → parser → map → REST GET) ──
+
+  /**
+   * Measures full-path latency from WebSocket frame send through to REST API response.
+   *
+   * <p>Unlike {@link #ingestLatencyUnder5ms()} which stops at the in-memory map, this test includes
+   * REST serialization and MockMvc HTTP round-trip in the measurement.
+   *
+   * <p>SLO: p99 &lt; 50 ms. The threshold is generous because this test runs after earlier tests
+   * that fill the persistence queue (10k capacity). Under queue contention the drop-oldest path in
+   * {@code enqueue()} adds per-frame overhead that inflates the p99 tail.
+   */
+  @Test
+  @Order(4)
+  void tickToTradeLatency_fullPath() throws Exception {
+    int iterations = 300;
+    long[] latencies = new long[iterations];
+    String symbol = "BTCUSDT";
+    long baseUpdateId = 40_000_000L;
+
+    WebSocket ws = serverWebSocket.get();
+    assertThat(ws).as("server-side WebSocket must be live from Test 3").isNotNull();
+
+    for (int i = 0; i < iterations; i++) {
+      long expectedUpdateId = baseUpdateId + i;
+      long eventTime = System.currentTimeMillis();
+      String frame = bookTickerFrame(symbol, expectedUpdateId, eventTime, "50000.00", "50001.00");
+
+      long t0 = System.nanoTime();
+      ws.send(frame);
+
+      long deadline = t0 + 5_000_000_000L;
+      boolean observed = false;
+      while (System.nanoTime() < deadline) {
+        var maybe = quoteService.get(symbol);
+        if (maybe.isPresent() && maybe.get().updateId() >= expectedUpdateId) {
+          observed = true;
+          break;
+        }
+        Thread.onSpinWait();
+      }
+
+      if (!observed) {
+        throw new AssertionError(
+            "Tick-to-trade: QuoteService did not reflect updateId " + expectedUpdateId);
+      }
+
+      var mvcResult =
+          mockMvc.perform(MockMvcRequestBuilders.get("/api/quotes/" + symbol)).andReturn();
+      String body = mvcResult.getResponse().getContentAsString();
+      JsonNode node = objectMapper.readTree(body);
+      assertThat(node.get("updateId").asLong()).isGreaterThanOrEqualTo(expectedUpdateId);
+
+      long t1 = System.nanoTime();
+      latencies[i] = t1 - t0;
+    }
+
+    Arrays.sort(latencies);
+    long p50 = latencies[iterations * 50 / 100];
+    long p99 = latencies[iterations * 99 / 100];
+    double p50Us = p50 / 1_000.0;
+    double p99Us = p99 / 1_000.0;
+
+    System.out.printf(
+        "tickToTradeLatency: p50=%.2f us, p99=%.2f us (target p99 < 50000 us)%n", p50Us, p99Us);
+
+    assertThat(p99)
+        .as("p99 tick-to-trade latency should be under 50 ms (observed %.2f us)", p99Us)
+        .isLessThan(50_000_000L);
+  }
+
+  // ── Test 5: Dev-profile boot without PostgreSQL ──────────────────────────
 
   /**
    * Nested test class verifying the application context loads under the {@code dev} profile with H2

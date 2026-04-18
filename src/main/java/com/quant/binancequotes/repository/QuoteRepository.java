@@ -1,7 +1,6 @@
 package com.quant.binancequotes.repository;
 
 import com.quant.binancequotes.model.Quote;
-import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -58,7 +57,7 @@ public class QuoteRepository {
                             "updateId", q.updateId(),
                             "eventTime", q.eventTime(),
                             "transactionTime", q.transactionTime(),
-                            "receivedAt", Timestamp.from(q.receivedAt()))))
+                            "receivedAt", q.receivedAt())))
             .toArray(SqlParameterSource[]::new);
 
     int[] results = jdbcTemplate.batchUpdate(insertSql, batch);

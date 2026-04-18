@@ -93,7 +93,7 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 - *Drop newest arrival.* Rejected: under backpressure, the newest data is the most valuable (it reflects current market state). Dropping the newest means the in-memory map and the DB diverge on *the most recent* quotes — the wrong direction.
 - *Spill to disk.* Rejected: complexity does not justify the benefit at this scale.
 
-**Consequences.** Under sustained DB outage we lose the oldest in-flight data. This is acceptable because (a) the in-memory map continues serving the *latest* to REST clients unaffected, (b) the DB regains consistency on every newer write, and (c) bursts of real pathological load at this scale are minutes long at worst — not hours.
+**Consequences.** Under sustained DB outage we lose the oldest in-flight data. This is an explicit deviation from the spec requirement to "persist the *complete* time-series history" — under pathological backpressure, the drop-oldest policy discards the oldest buffered quotes before they reach PostgreSQL. This trade-off is acceptable because (a) the in-memory map continues serving the *latest* to REST clients unaffected, (b) the DB regains consistency on every newer write, and (c) bursts of real pathological load at this scale are minutes long at worst — not hours. The cumulative drop count is tracked by the `binance.quotes.dropped.total` Micrometer counter and exposed in the `persistenceQueue` health indicator details.
 
 ---
 
@@ -112,17 +112,17 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 
 ---
 
-## DD-8 — `spring.threads.virtual.enabled=true`, plus one explicit virtual thread for the batch drainer
+## DD-8 — `spring.threads.virtual.enabled=true`, plus one explicit platform thread for the batch drainer
 
 **Context.** Java 21 virtual threads remove the need to size thread pools for I/O-bound work. Spring Boot 3.2+ integrates this at the framework level.
 
-**Decision.** Set `spring.threads.virtual.enabled=true` in `application.yml`. This makes Tomcat request handlers and `@Async` / auto-configured `TaskExecutor` beans use virtual threads. Separately, the batch-persistence drainer is started explicitly as `Thread.ofVirtual().name("quote-batch-writer").start(...)` from `@PostConstruct`, joined from `@PreDestroy`.
+**Decision.** Set `spring.threads.virtual.enabled=true` in `application.yml`. This makes Tomcat request handlers and `@Async` / auto-configured `TaskExecutor` beans use virtual threads. Separately, the batch-persistence drainer is started explicitly as `Thread.ofPlatform().name("quote-batch-writer").start(...)` from `@PostConstruct`, joined from `@PreDestroy`. A platform thread is used for the drainer because it is a single, long-lived, dedicated loop — virtual threads provide no benefit here (see TODO item "Fix Virtual Thread Misuse on Drainer").
 
 **Alternatives considered.**
 - *Manually create virtual threads everywhere.* Rejected: not idiomatic on Spring Boot 3.2+.
 - *Rely only on the property.* Rejected: the property covers request handlers and executor-backed tasks, not a dedicated, long-running drainer loop owned by one service. That loop is simpler as an explicit thread — no need to route it through an executor.
 
-**Consequences.** REST requests, the drainer, and any future `@Async` call all get virtual threads for free. Stack traces name the drainer (`quote-batch-writer`) so it's greppable in `jcmd Thread.print`.
+**Consequences.** REST requests and any future `@Async` call get virtual threads for free via the Spring property. The drainer uses a platform thread, which is simpler and more appropriate for a single long-lived loop. Stack traces name the drainer (`quote-batch-writer`) so it's greppable in `jcmd Thread.print`.
 
 ---
 

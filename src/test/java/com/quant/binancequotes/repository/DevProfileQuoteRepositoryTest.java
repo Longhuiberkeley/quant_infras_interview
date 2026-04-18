@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.quant.binancequotes.model.Quote;
 import com.quant.binancequotes.websocket.BinanceWebSocketClient;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,7 +35,7 @@ class DevProfileQuoteRepositoryTest {
             1L,
             System.currentTimeMillis(),
             System.currentTimeMillis(),
-            Instant.now());
+            System.currentTimeMillis());
 
     // Initially insert 1 row
     int inserted = quoteRepository.batchInsert(List.of(quote1));

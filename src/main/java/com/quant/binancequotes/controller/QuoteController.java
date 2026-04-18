@@ -57,7 +57,7 @@ public class QuoteController {
   }
 
   /**
-   * Checked exception signalling that the requested symbol is unknown or has no quote yet.
+   * Runtime exception signalling that the requested symbol is unknown or has no quote yet.
    *
    * <p>Caught by {@link ApiExceptionHandler} and rendered as a 404 JSON response.
    */

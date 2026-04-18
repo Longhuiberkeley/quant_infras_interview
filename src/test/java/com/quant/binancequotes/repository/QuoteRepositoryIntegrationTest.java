@@ -8,7 +8,6 @@ import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import javax.sql.DataSource;
@@ -76,7 +75,7 @@ class QuoteRepositoryIntegrationTest {
         updateId,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 
   @Test

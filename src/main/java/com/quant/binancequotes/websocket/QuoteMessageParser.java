@@ -3,9 +3,9 @@ package com.quant.binancequotes.websocket;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.binancequotes.config.AppProperties;
 import com.quant.binancequotes.model.Quote;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,9 +37,11 @@ public class QuoteMessageParser {
   /** Maximum allowed future drift for eventTime (1 hour). */
   private static final long MAX_FUTURE_DRIFT_MS = 3_600_000L;
 
+  private final AppProperties appProperties;
   private final ObjectMapper mapper;
 
-  public QuoteMessageParser() {
+  public QuoteMessageParser(AppProperties appProperties) {
+    this.appProperties = appProperties;
     this.mapper = new ObjectMapper();
     this.mapper.configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
   }
@@ -105,6 +107,10 @@ public class QuoteMessageParser {
     }
 
     // Business invariant validation (DD-13)
+    if (!appProperties.getSymbols().contains(symbol)) {
+      log.warn("Unconfigured symbol received — skipping: {}", symbol);
+      return Optional.empty();
+    }
     if (bid.compareTo(BigDecimal.ZERO) <= 0) {
       log.warn("Zero or negative bid — skipping: symbol={}, bid={}", symbol, bid);
       return Optional.empty();
@@ -152,7 +158,7 @@ public class QuoteMessageParser {
       return Optional.empty();
     }
 
-    Instant receivedAt = Instant.now();
+    long receivedAt = System.currentTimeMillis();
     return Optional.of(
         new Quote(
             symbol, bid, bidSize, ask, askSize, updateId, eventTime, transactionTime, receivedAt));

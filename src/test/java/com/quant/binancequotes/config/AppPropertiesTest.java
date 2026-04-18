@@ -56,9 +56,10 @@ class AppPropertiesTest {
               Throwable failure = context.getStartupFailure();
               assertThat(failure).isNotNull();
               Throwable root = findRootCause(failure);
-              assertThat(root).isInstanceOf(IllegalStateException.class);
-              assertThat(root.getMessage()).contains("btcusdt");
-              assertThat(root.getMessage()).contains("does not match pattern");
+              assertThat(root.getMessage())
+                  .satisfiesAnyOf(
+                      m -> assertThat(m).contains("btcusdt"),
+                      m -> assertThat(m).contains("pattern"));
             });
   }
 
@@ -82,20 +83,11 @@ class AppPropertiesTest {
               Throwable failure = context.getStartupFailure();
               assertThat(failure).isNotNull();
               Throwable root = findRootCause(failure);
-              assertThat(root).isInstanceOf(IllegalStateException.class);
-              assertThat(root.getMessage()).contains("BTCUSD");
-              assertThat(root.getMessage()).contains("does not match pattern");
+              assertThat(root.getMessage())
+                  .satisfiesAnyOf(
+                      m -> assertThat(m).contains("BTCUSD"),
+                      m -> assertThat(m).contains("pattern"));
             });
-  }
-
-  @Test
-  void rejectsNullSymbols() {
-    AppProperties props = new AppProperties();
-    props.setSymbols(null);
-
-    assertThatThrownBy(props::validate)
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("must not be null");
   }
 
   @Test

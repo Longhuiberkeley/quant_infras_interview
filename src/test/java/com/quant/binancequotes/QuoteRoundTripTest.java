@@ -10,7 +10,6 @@ import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.time.Instant;
 import java.util.List;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
@@ -64,7 +63,7 @@ class QuoteRoundTripTest {
         1000000L,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 
   @Test
@@ -133,7 +132,7 @@ class QuoteRoundTripTest {
               rs.getLong("update_id"),
               rs.getLong("event_time"),
               rs.getLong("transaction_time"),
-              rs.getTimestamp("received_at").toInstant());
+              rs.getLong("received_at"));
     }
 
     // 4. Serialize again

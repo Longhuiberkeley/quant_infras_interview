@@ -8,7 +8,7 @@ Specification: [`docs/interviewer_requirements.md`](docs/interviewer_requirement
 
 ## Quick Start
 
-**Prerequisites:** Java 21+, Maven 3.9+. Docker is optional.
+**Prerequisites:** Java 21 (required; not yet compatible with JDK 25+), Maven 3.9+. Docker is optional.
 
 ```bash
 # SDKMAN users:
@@ -25,6 +25,8 @@ cp .env.example .env && docker compose up --build
 ```
 
 All tests are hermetic — no external network or database required. `mvn clean verify` is the single command that proves everything works.
+
+**Formatting:** This project uses [Spotless](https://github.com/diffplug/spotless) with `google-java-format`. `mvn verify` will fail if any file is not formatted. Run `mvn spotless:apply` to auto-format before committing.
 
 ## API Endpoints
 
@@ -76,7 +78,7 @@ Binance WebSocket (fstream) ──▶ QuoteMessageParser ──▶ QuoteService 
 ```
 
 - **Reads** never hit the database — `QuoteService` serves from an in-memory `ConcurrentHashMap`.
-- **Writes** are batched asynchronously on a single virtual thread (`quote-batch-writer`) with a bounded queue (10 000) and backpressure (drop-oldest at 90%).
+- **Writes** are batched asynchronously on a single platform thread (`quote-batch-writer`) with a bounded queue (10 000) and backpressure (drop-oldest at 90%).
 - **Deduplication** is handled by `UNIQUE(symbol, update_id)` + `ON CONFLICT DO NOTHING`.
 
 Full system diagram: [`docs/architecture.md`](docs/architecture.md).
@@ -172,7 +174,7 @@ All 5 SLO rows are validated by tests that measure and assert:
 | Read p99 < 1 ms | `QuoteServicePerformanceTest#p99ReadUnder1ms` |
 | REST p99 < 5 ms | `QuoteControllerTest#p99LatencyUnder5ms` |
 | Ingest-to-available p99 < 5 ms | `ApplicationIntegrationTest#ingestLatencyUnder5ms` |
-| Freshness lag p99 < 500 ms | `IngestLagTest#lagGaugeUnder500msAt500rps` |
+| Freshness lag p99 < 500 ms | `LagGaugeTest#lagGaugeUnder500msAt500rps` |
 | Persistence headroom ≥ 10× | `BatchPersistenceServiceTest#sustains500rps` |
 
 Pre-submission audit: [`docs/audit_results.md`](docs/audit_results.md) (71/71 checks passed, P1–P9 + P10a + P10b).

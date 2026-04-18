@@ -82,7 +82,7 @@ class BinanceWebSocketClientTest {
             binanceProperties,
             quoteService,
             batchPersistenceService,
-            new QuoteMessageParser(),
+            new QuoteMessageParser(appProperties),
             meterRegistry);
 
     mockWebSocket = mock(WebSocket.class);
@@ -405,6 +405,15 @@ class BinanceWebSocketClientTest {
     assertTrue(
         Double.isNaN(maxLagGauge.value()),
         "Fleet-max lag gauge should report NaN before any messages arrive");
+  }
+
+  @Test
+  void lagGauge_perSymbolReturnsNaNWhenNoData() {
+    var btcGauge = meterRegistry.find("binance.quote.lag.millis").tag("symbol", "BTCUSDT").gauge();
+    assertNotNull(btcGauge, "Per-symbol gauge should be registered for BTCUSDT");
+    assertTrue(
+        Double.isNaN(btcGauge.value()),
+        "Per-symbol lag gauge should report NaN before any messages arrive for that symbol");
   }
 
   @Test

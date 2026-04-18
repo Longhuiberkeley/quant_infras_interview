@@ -115,7 +115,7 @@ Maps each interviewer requirement → design decision → implementation module 
 | REQ-3 Quote fields | `QuoteMessageParserTest` | `ApplicationIntegrationTest` |
 | REQ-4 DB persistence | `BatchPersistenceServiceTest` | `QuoteRepositoryIntegrationTest` |
 | REQ-5 Latest quotes API | `QuoteServiceTest`, `QuoteControllerTest` | `ApplicationIntegrationTest` |
-| REQ-6 Latency | `QuoteServicePerformanceTest`, `IngestLagTest` | — |
+| REQ-6 Latency | `QuoteServicePerformanceTest`, `LagGaugeTest` | — |
 | REQ-7 Test coverage | (meta-requirement) | — |
 
 ---

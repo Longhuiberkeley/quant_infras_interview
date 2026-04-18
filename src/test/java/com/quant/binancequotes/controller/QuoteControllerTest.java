@@ -10,7 +10,6 @@ import com.quant.binancequotes.config.AppProperties;
 import com.quant.binancequotes.model.Quote;
 import com.quant.binancequotes.service.QuoteService;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -141,7 +140,7 @@ class QuoteControllerTest {
             1L,
             System.currentTimeMillis(),
             System.currentTimeMillis(),
-            Instant.now());
+            System.currentTimeMillis());
     when(quoteService.get("ETHUSDT")).thenReturn(Optional.of(q));
 
     MvcResult result =
@@ -232,6 +231,6 @@ class QuoteControllerTest {
         updateId,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 }

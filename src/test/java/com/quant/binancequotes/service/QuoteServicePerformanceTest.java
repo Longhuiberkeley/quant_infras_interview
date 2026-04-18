@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.quant.binancequotes.model.Quote;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
@@ -71,7 +70,7 @@ class QuoteServicePerformanceTest {
     latencies.sort(Long::compare);
     int size = latencies.size();
     long p50 = latencies.get(size / 2);
-    long p99 = latencies.get((int) (size * 0.99));
+    long p99 = latencies.get((int) Math.ceil(size * 0.99) - 1);
     long max = latencies.get(size - 1);
 
     p50Ns = p50;
@@ -121,6 +120,6 @@ class QuoteServicePerformanceTest {
         updateId,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 }

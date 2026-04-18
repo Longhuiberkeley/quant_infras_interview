@@ -163,7 +163,7 @@ This document mirrors `TODO.md` section-by-section. Each item lists formal accep
 | AC1 | No `null` passed for `@NotNull`-annotated parameters in any test | Yes — `IngestLagTest` uses `mock(okhttp3.WebSocket.class)` |
 | AC2 | All `onMessage` calls pass a mock `WebSocket` instead of `null` | Yes — `IngestLagTest` line 123 creates mock, passed to all calls |
 
-**Evidence:** `IngestLagTest.java:5` imports `mock()`, line 123 creates `mock(okhttp3.WebSocket.class)`, line 132 passes it to `onMessage`.
+**Evidence:** `LagGaugeTest.java:5` imports `mock()`, line 124 creates `mock(okhttp3.WebSocket.class)`, line 132 passes it to `onMessage`.
 
 ---
 
@@ -215,11 +215,11 @@ This document mirrors `TODO.md` section-by-section. Each item lists formal accep
 
 | AC | Criterion | Met? |
 |----|-----------|------|
-| AC1 | `queueCapacity` is a `final int` field, set once at construction | Yes — `BatchPersistenceService.java:40` |
+| AC1 | `queueCapacity` is a `final int` field, set once at construction | Yes — `BatchPersistenceService.java:43` |
 | AC2 | No calls to `queue.remainingCapacity()` anywhere in the class | Yes — only `queue.size()` and `queue.offer/poll/drainTo` |
-| AC3 | Utilization computed as `queue.size() / queueCapacity` (stable denominator) | Yes — `BatchPersistenceService.java:58` |
+| AC3 | Utilization computed as `queue.size() / queueCapacity` (stable denominator) | Yes — `BatchPersistenceService.java:97` |
 
-**Evidence:** `BatchPersistenceService.java:38-40,58,78`.
+**Evidence:** `BatchPersistenceService.java:37-43,56,81`.
 
 ---
 
@@ -229,12 +229,12 @@ This document mirrors `TODO.md` section-by-section. Each item lists formal accep
 
 | AC | Criterion | Met? |
 |----|-----------|------|
-| AC1 | `shutdown()` calls `drainerThread.interrupt()` before `join()` | Yes — `BatchPersistenceService.java:97` |
-| AC2 | `drainLoop`'s `catch (InterruptedException)` breaks out of poll loop | Yes — `BatchPersistenceService.java:140-143` |
+| AC1 | `shutdown()` calls `drainerThread.interrupt()` before `join()` | Yes — `BatchPersistenceService.java:124` |
+| AC2 | `drainLoop`'s `catch (InterruptedException)` breaks out of poll loop | Yes — `BatchPersistenceService.java:155-157` |
 | AC3 | Final drain still executes after interrupt (queued items not skipped) | Yes — code after while loop flushes batch + drains remainder |
-| AC4 | `flush()` clears interrupt flag around JDBC to prevent connection corruption | Yes — `BatchPersistenceService.java:151` |
+| AC4 | `flush()` clears interrupt flag around JDBC to prevent connection corruption | Yes — `BatchPersistenceService.java:176` |
 
-**Evidence:** `BatchPersistenceService.java:93-108` (shutdown), `130-150` (drainLoop), `151-162` (flush).
+**Evidence:** `BatchPersistenceService.java:120-135` (shutdown), `139-158` (drainLoop), `173-186` (flush).
 
 ---
 
@@ -298,7 +298,192 @@ This document mirrors `TODO.md` section-by-section. Each item lists formal accep
 
 | Status | Count | Items |
 |--------|-------|-------|
-| Pass | 19 | Container Healthcheck, PID-1 Shutdown, Batch Insert Count, scheduleReconnect Exception, Suppress Stack Traces, Thread-safe Latch, Racy Capacity, Shutdown Drain Latency, DEBUG in Base Profile, Hardcoded JAR, Maven Image, Dev Profile H2, Liveness/Readiness Split, IDEA Test Quirks, Lag Gauge NaN, @Order(1) Removal, Getter Visibility, Reconnect Race, Backoff Reset |
-| Partial | 0 | — |
+| Pass | 30 | All reviewed items (1-20, 31, 42) + Virtual Thread Fix (21) + new items: Drop-Oldest Counter, Schema CHECKs, SymbolNotFoundException Javadoc, @JsonIgnore Removal, p99 Fix, LagGaugeTest Rename, Java 21 Pin, Spotless Docs |
+| Partial | 1 | Drainer @PostConstruct (AC2 `final` field not possible with @PostConstruct pattern) |
 | Fail | 0 | — |
 
+
+### 20. Unify Timestamp Representation *(Interviewer #6)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | `Quote.receivedAt` is `long` (epoch millis) | Yes — `Quote.java` |
+| AC2 | `schema.sql` uses `BIGINT` for `received_at` | Yes — `schema.sql` |
+| AC3 | JSON responses do not mix epoch millis with ISO-8601 strings | Yes — `Quote` record serialization |
+
+**Evidence:** `Quote.java`, `schema.sql`.
+
+---
+
+### 21. Fix Virtual Thread Misuse on Drainer *(Interviewer #7)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | `BatchPersistenceService` uses `Thread.ofPlatform()` | Yes — `BatchPersistenceService.java:62` |
+
+**Evidence:** `BatchPersistenceService.java` — `startDrainer()` method annotated `@PostConstruct` creates the thread via `Thread.ofPlatform().name("quote-batch-writer").start(this::drainLoop)`. Class-level javadoc updated to reflect "platform thread".
+
+---
+
+### 22. Move Drainer Thread Start to `@PostConstruct` *(Claude #8)*
+
+**Status:** partial
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | Thread start is moved to `@PostConstruct` | Yes — `BatchPersistenceService.java:60-63` |
+| AC2 | `drainerThread` field is `final` | No — field is non-final because `@PostConstruct` assigns after construction (Java restriction). Field is `private Thread drainerThread` at line 45. Javadoc on `startDrainer()` explains the design choice. |
+
+**Evidence:** `BatchPersistenceService.java` — constructor (lines 47-55) initializes config fields only; `@PostConstruct startDrainer()` (lines 57-60) starts the drainer thread after Spring guarantees all beans are wired.
+
+**Note on AC2:** Making `drainerThread` `final` is incompatible with `@PostConstruct` assignment in Java. The safety goal (avoid orphaned thread on partial wiring) is achieved by `@PostConstruct`; the `final` keyword would add compile-time immutability but cannot be combined with this pattern.
+
+---
+
+### 23. Enforce Symbol Allowlist in Parser *(Claude #10)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | `QuoteMessageParser` constructor takes `AppProperties` | Yes — `QuoteMessageParser.java:44` |
+| AC2 | Parser rejects unconfigured symbols | Yes — `QuoteMessageParser.java:108` |
+
+**Evidence:** `QuoteMessageParser.java`.
+
+---
+
+### 24. Address Strict Monotonic Upsert *(Claude #14)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | `QuoteService.update` uses strict `>` | Yes — `QuoteService.java:36` |
+| AC2 | Uses `merge` instead of `compute` | Yes — `QuoteService.java:33` |
+
+**Evidence:** `QuoteService.java`.
+
+---
+
+### 25. AppProperties Validation Consolidation *(Claude #18)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | Redundant `@PostConstruct` removed | Yes — `AppProperties.java` |
+| AC2 | Full JSR-303 annotations used (`@Pattern` on list element) | Yes — `AppProperties.java:20` |
+
+**Evidence:** `AppProperties.java`.
+
+---
+
+### 26. Document "Drop Oldest" Spec Deviation + Add Counter *(Claude #15)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | `binance.quotes.dropped.total` Micrometer counter registered | Yes — `BatchPersistenceService.java` constructor registers `meterRegistry.counter(...)` as `droppedCounter` |
+| AC2 | `design_decisions.md` DD-6 explicitly notes the spec deviation | Yes — DD-6 Consequences section now states "explicit deviation from the spec requirement to persist the complete time-series history" |
+
+**Evidence:** `BatchPersistenceService.java` (constructor), `design_decisions.md` DD-6.
+
+---
+
+### 27. Add Missing Schema CHECK Constraints *(Claude)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | `event_time > 0` CHECK constraint present | Yes — `schema.sql:16` |
+| AC2 | `update_id > 0` CHECK constraint present | Yes — `schema.sql:17` |
+| AC3 | `bid_price <= ask_price` CHECK constraint present | Yes — `schema.sql:18` |
+
+**Evidence:** `schema.sql`.
+
+---
+
+### 28. Fix `SymbolNotFoundException` Javadoc *(Claude)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | Javadoc says "Runtime exception" (not "Checked exception") | Yes — `QuoteController.java:59` |
+
+**Evidence:** `QuoteController.java`.
+
+---
+
+### 29. Remove No-op `@JsonIgnore` on `Quote.lagMillis()` *(Claude)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | `@JsonIgnore` annotation removed from `lagMillis()` | Yes — `Quote.java` |
+| AC2 | Unused `JsonIgnore` import removed | Yes — `Quote.java` |
+
+**Evidence:** `Quote.java`.
+
+---
+
+### 30. Fix `QuoteServicePerformanceTest` p99 Off-by-One *(Claude)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | p99 index uses `Math.ceil(size * 0.99) - 1` | Yes — `QuoteServicePerformanceTest.java` |
+
+**Evidence:** `QuoteServicePerformanceTest.java`.
+
+---
+
+### 31. Rename `IngestLagTest` to `LagGaugeTest` *(Claude)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | File renamed from `IngestLagTest.java` to `LagGaugeTest.java` | Yes |
+| AC2 | Class renamed to `LagGaugeTest` | Yes |
+| AC3 | Javadoc clarifies test validates gauge arithmetic, not actual system lag | Yes |
+| AC4 | README reference updated | Yes — `README.md` |
+
+**Evidence:** `LagGaugeTest.java`, `README.md`.
+
+---
+
+### 32. Pin Java 21 as Supported Version *(Interviewer #5)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | README says Java 21 is required (not "21+") | Yes — `README.md` |
+| AC2 | Notes incompatibility with JDK 25+ | Yes — `README.md` |
+
+**Evidence:** `README.md`.
+
+---
+
+### 33. Document Spotless Gate in README *(GLM5.1)*
+
+**Status:** pass
+
+| AC | Criterion | Met? |
+|----|-----------|------|
+| AC1 | README mentions `mvn verify` fails if code isn't formatted | Yes |
+| AC2 | README mentions `mvn spotless:apply` as the fix | Yes |
+
+**Evidence:** `README.md` Quick Start section.
+
+---
