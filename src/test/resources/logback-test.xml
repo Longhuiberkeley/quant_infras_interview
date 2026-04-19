@@ -6,6 +6,7 @@
     <!-- Suppress expected stack traces for malformed JSON and connection drop tests -->
     <logger name="com.quant.binancequotes.websocket.QuoteMessageParser" level="ERROR" />
     <logger name="com.quant.binancequotes.websocket.BinanceWebSocketClient" level="OFF" />
+    <logger name="com.quant.binancequotes.service.BatchPersistenceService" level="OFF" />
 
     <root level="INFO">
         <appender-ref ref="CONSOLE" />

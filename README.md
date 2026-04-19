@@ -14,7 +14,7 @@ Specification: [`docs/interviewer_requirements.md`](docs/interviewer_requirement
 # SDKMAN users:
 source "$HOME/.sdkman/bin/sdkman-init.sh"
 
-# Build, format, and test (97 tests, no external infra needed)
+# Build, format, and test (131 tests)
 mvn clean verify
 
 # Run with in-memory H2 (no Docker required)
@@ -24,7 +24,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=dev
 cp .env.example .env && docker compose up --build
 ```
 
-All tests are hermetic — no external network or database required. `mvn clean verify` is the single command that proves everything works. The `DockerComposeSmokeTest` runs **only** when `DOCKER_AVAILABLE=true` is set; it is skipped by default, so `mvn verify` does **not** require Docker. Docker is needed only for `docker compose up` (full stack with PostgreSQL) and the Docker Compose smoke test. Testcontainers-based integration tests use ephemeral containers that start automatically and require only a Docker daemon running locally.
+`mvn clean verify` requires a Docker daemon running locally (for Testcontainers-based integration tests that start ephemeral PostgreSQL containers automatically). No manual database setup, no Docker Compose, no external network needed. The `DockerComposeSmokeTest` runs **only** when `DOCKER_AVAILABLE=true` is set; it is skipped by default. Docker is needed separately for `docker compose up` (full stack with persistent PostgreSQL).
 
 **Formatting:** This project uses [Spotless](https://github.com/diffplug/spotless) with `google-java-format`. `mvn verify` will fail if any file is not formatted. Run `mvn spotless:apply` to auto-format before committing.
 
@@ -52,7 +52,7 @@ curl -s localhost:18080/api/quotes/BTCUSDT | python3 -m json.tool
   "updateId": 4892741,
   "eventTime": 1713000000000,
   "transactionTime": 1713000000001,
-  "receivedAt": "2026-04-13T12:00:00.123Z"
+  "receivedAt": 1713000000123
 }
 ```
 

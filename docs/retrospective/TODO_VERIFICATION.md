@@ -333,10 +333,10 @@ This document mirrors `TODO.md` section-by-section. Each item lists formal accep
 | AC | Criterion | Met? |
 |----|-----------|------|
 | AC1 | `getOkHttpClient()` is package-private | Yes — no `public` modifier |
-| AC2 | `getWebSocket()` is package-private | Yes — no `public` modifier |
+| AC2 | `getWebSocket()` is `public` (required by `ReconnectRecoveryLatencyTest` in root package) | Yes — cross-package test access necessitates `public`; all other test-only getters remain package-private |
 | AC3 | `getClosedLatch()` is package-private | Yes — no `public` modifier |
 
-**Evidence:** `BinanceWebSocketClient.java` — all three getters are package-private. `ApplicationIntegrationTest.java` uses `ReflectionTestUtils.getField()` to access `webSocket` field from a different package.
+**Evidence:** `BinanceWebSocketClient.java` — `getOkHttpClient()` and `getClosedLatch()` are package-private. `getWebSocket()` is `public` because `ReconnectRecoveryLatencyTest` (package `com.quant.binancequotes`) needs access to the WebSocket instance for reconnect testing. `ApplicationIntegrationTest.java` uses `ReflectionTestUtils.getField()` for field-level access from a different package.
 
 ---
 
