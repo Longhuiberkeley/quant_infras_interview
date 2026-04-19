@@ -408,13 +408,18 @@ public class BinanceWebSocketClient extends WebSocketListener {
     return scheduler;
   }
 
+  /** Sets the OkHttpClient (for testing — allows injecting a mock/spy without calling start). */
+  void setOkHttpClient(OkHttpClient client) {
+    this.okHttpClient = client;
+  }
+
   /** Exposes the OkHttpClient for test inspection. */
   OkHttpClient getOkHttpClient() {
     return okHttpClient;
   }
 
-  /** Exposes the WebSocket for test inspection. */
-  WebSocket getWebSocket() {
+  /** Exposes the WebSocket for test inspection and reconnect testing. */
+  public WebSocket getWebSocket() {
     return webSocket;
   }
 

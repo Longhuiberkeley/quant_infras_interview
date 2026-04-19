@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.binancequotes.config.AppProperties;
 import com.quant.binancequotes.model.Quote;
+import com.quant.binancequotes.repository.QuoteHistoryRepository;
 import com.quant.binancequotes.service.QuoteService;
 import java.math.BigDecimal;
 import java.util.List;
@@ -31,6 +32,8 @@ class QuoteControllerTest {
   @MockBean private QuoteService quoteService;
 
   @MockBean private AppProperties appProperties;
+
+  @MockBean private QuoteHistoryRepository quoteHistoryRepository;
 
   @BeforeEach
   void setUp() {

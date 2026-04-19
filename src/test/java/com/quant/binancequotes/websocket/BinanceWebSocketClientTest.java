@@ -15,6 +15,8 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okio.ByteString;
@@ -96,8 +98,7 @@ class BinanceWebSocketClientTest {
 
   @AfterEach
   void tearDown() {
-    // Ensure the client's scheduler is shut down to avoid thread leaks
-    client.getScheduler().shutdownNow();
+    client.shutdown();
   }
 
   // ── Reconnect storm: exactly one reconnect scheduled ───────────────────────
@@ -467,5 +468,88 @@ class BinanceWebSocketClientTest {
     assertTrue(client.isReconnecting(), "reconnecting CAS should succeed on code 1006");
     assertTrue(client.getCurrentBackoffMs() >= 2000L, "backoff should have been increased");
     assertFalse(client.isShuttingDown(), "graceful-shutdown path should NOT be triggered");
+  }
+
+  // ── Reconnect exception → retry with backoff ───────────────────────────────
+
+  @Test
+  void reconnect_exception_triggersExponentialBackoff() throws Exception {
+    OkHttpClient mockOkHttp = mock(OkHttpClient.class);
+    AtomicInteger newWebSocketCallCount = new AtomicInteger(0);
+
+    when(mockOkHttp.newWebSocket(any(Request.class), eq(client)))
+        .thenAnswer(
+            inv -> {
+              int call = newWebSocketCallCount.incrementAndGet();
+              if (call <= 2) {
+                throw new RuntimeException("simulated newWebSocket failure #" + call);
+              }
+              return mock(WebSocket.class);
+            });
+
+    client.setOkHttpClient(mockOkHttp);
+
+    client.onFailure(mockWebSocket, new RuntimeException("initial disconnect"), mockResponse);
+
+    assertTrue(client.isReconnecting(), "reconnecting flag should be set after onFailure");
+    assertEquals(
+        2000L, client.getCurrentBackoffMs(), "backoff after initial onFailure should be 2000");
+
+    // Wait for the first reconnect task to execute (delay = 2000ms + margin)
+    Thread.sleep(3_500);
+
+    // After the first reconnect task fails (newWebSocket throws), the catch block:
+    //   - clears reconnecting
+    //   - increases backoff (2000 → 4000)
+    //   - calls scheduleReconnect() which re-sets the flag
+    // The second reconnect task will also fail (delay = 4000ms)
+    // Wait for it to complete: 4000 + margin
+    Thread.sleep(5_000);
+
+    // After second failure, backoff should have increased again (4000 → 8000)
+    assertTrue(
+        client.getCurrentBackoffMs() >= 8000L,
+        "backoff should be at least 8000 after two reconnect failures, was "
+            + client.getCurrentBackoffMs());
+
+    // Wait for the third reconnect task (delay = 8000ms) — this one succeeds
+    Thread.sleep(9_500);
+
+    // After successful newWebSocket, the socket is created but onOpen hasn't fired yet.
+    // The reconnecting flag should still be true until onOpen fires.
+    // Verify that exactly 3 newWebSocket calls were made (2 failures + 1 success)
+    assertEquals(
+        3,
+        newWebSocketCallCount.get(),
+        "newWebSocket should have been called exactly 3 times (2 failures + 1 success)");
+  }
+
+  @Test
+  void reconnect_exception_doesNotStackAttempts() throws Exception {
+    OkHttpClient mockOkHttp = mock(OkHttpClient.class);
+    AtomicInteger newWebSocketCallCount = new AtomicInteger(0);
+
+    when(mockOkHttp.newWebSocket(any(Request.class), eq(client)))
+        .thenAnswer(
+            inv -> {
+              newWebSocketCallCount.incrementAndGet();
+              throw new RuntimeException("simulated failure");
+            });
+
+    client.setOkHttpClient(mockOkHttp);
+
+    client.onFailure(mockWebSocket, new RuntimeException("initial disconnect"), mockResponse);
+
+    assertTrue(client.isReconnecting());
+
+    // Wait long enough for several reconnect cycles
+    // First attempt: delay 2000ms → fails → schedules at 4000ms
+    // Second attempt: delay 4000ms → fails → schedules at 8000ms
+    Thread.sleep(15_000);
+
+    // Count should be deterministic: each failure schedules exactly one next attempt
+    int calls = newWebSocketCallCount.get();
+    assertTrue(calls >= 2, "Should have at least 2 reconnect attempts, got " + calls);
+    assertTrue(calls <= 4, "Should have at most 4 reconnect attempts (no stacking), got " + calls);
   }
 }

@@ -57,6 +57,9 @@ app:
     - TRXUSDT
     - LINKUSDT
     - AVAXUSDT
+  rate-limit:
+    max-concurrent: 100
+    acquire-timeout-ms: 500
 
 binance:
   ws:

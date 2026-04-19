@@ -24,7 +24,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=dev
 cp .env.example .env && docker compose up --build
 ```
 
-All tests are hermetic — no external network or database required. `mvn clean verify` is the single command that proves everything works.
+All tests are hermetic — no external network or database required. `mvn clean verify` is the single command that proves everything works. The `DockerComposeSmokeTest` runs **only** when `DOCKER_AVAILABLE=true` is set; it is skipped by default, so `mvn verify` does **not** require Docker. Docker is needed only for `docker compose up` (full stack with PostgreSQL) and the Docker Compose smoke test. Testcontainers-based integration tests use ephemeral containers that start automatically and require only a Docker daemon running locally.
 
 **Formatting:** This project uses [Spotless](https://github.com/diffplug/spotless) with `google-java-format`. `mvn verify` will fail if any file is not formatted. Run `mvn spotless:apply` to auto-format before committing.
 
@@ -34,6 +34,7 @@ All tests are hermetic — no external network or database required. `mvn clean 
 |--------|------|-------------|
 | `GET` | `/api/quotes` | Latest quote for every configured symbol |
 | `GET` | `/api/quotes/{symbol}` | Latest quote for a single symbol (404 if unknown or no quote yet) |
+| `GET` | `/api/quotes/{symbol}/history?from=X&to=Y` | Historical quotes from PostgreSQL for a symbol (epoch millis, max 1000 results) |
 
 ### Example
 

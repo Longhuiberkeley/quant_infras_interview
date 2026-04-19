@@ -219,3 +219,31 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 - **Per-symbol dedicated drainer threads.** One drainer scales fine to ~10⁴ msg/s. Revisit if sustained rate grows 100×.
 - **Metrics backend (Prometheus/OTel).** Actuator + the `binance.quote.lag.millis` gauge is enough signal for an interview project; production would add an exporter.
 - **Schema migrations (Flyway/Liquibase).** A single flat `schema.sql` is sufficient for one-day scope.
+
+---
+
+## DD-14 — Semaphore-based concurrency limiting on REST endpoints
+
+**Context.** The spec does not mandate rate limiting, but an unbounded API can be trivially DoSed by a misbehaving client. At the same time, the service is single-node and low-traffic (10 instruments, internal consumers), so a full token-bucket implementation (Bucket4j) is overkill.
+
+**Decision.** Add a `OncePerRequestFilter` backed by a `java.util.concurrent.Semaphore` with configurable permits (default 100). Requests to `/api/**` paths must acquire a permit before processing; if none is available within a timeout (default 500 ms), a 429 is returned. Non-API paths (actuator, etc.) bypass the filter entirely.
+
+**Alternatives considered.**
+- *Bucket4j token-bucket.* Rejected: adds a dependency for a problem that doesn't exist at this scale. Semaphore-based concurrency control is sufficient and zero-dependency.
+- *No rate limiting.* Acceptable for the original spec but noted as a gap by reviewers. Adding it demonstrates production-mindedness.
+
+**Consequences.** At most 100 concurrent API requests; others get 429. This is generous for 10 instruments and internal consumers. The semaphore is non-fair (the default); for 10 instruments with internal consumers, starvation is not a practical concern. With virtual threads enabled (`spring.threads.virtual.enabled=true`), `tryAcquire` blocks a virtual thread (cheap). The timeout (default 500 ms) bounds the wait.
+
+---
+
+## DD-15 — Historical quote query endpoint
+
+**Context.** The original spec requires only the latest quote per instrument. The persistence layer (PostgreSQL with a composite index on `(symbol, event_time DESC)`) is naturally suited for time-range queries, but no endpoint exposes this capability.
+
+**Decision.** Add `GET /api/quotes/{symbol}/history?from=X&to=Y` that queries PostgreSQL directly using `NamedParameterJdbcTemplate` with named parameters. Returns up to 1000 results ordered by `event_time DESC`. Uses the same `Quote` record for serialization (DD-12). Out of scope per original spec but noted as a future enhancement; implemented to demonstrate the persistence layer is queryable.
+
+**Alternatives considered.**
+- *No historical endpoint.* The original spec doesn't require it, but reviewers noted the absence.
+- *Streaming/cursor-based pagination.* Rejected for scope: `LIMIT 1000` is sufficient for an interview project.
+
+**Consequences.** This is the only REST endpoint that hits the database. The composite index `idx_quotes_symbol_time` makes the query efficient. No DTO layer — reuses the `Quote` record (DD-12). The endpoint validates the symbol against the configured allowlist, consistent with the latest-quote endpoint.

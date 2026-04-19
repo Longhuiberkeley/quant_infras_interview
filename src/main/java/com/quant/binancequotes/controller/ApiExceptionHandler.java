@@ -5,6 +5,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -25,6 +26,12 @@ public class ApiExceptionHandler {
   public Map<String, String> handleSymbolNotFound(SymbolNotFoundException ex) {
     log.debug("Symbol not found: {}", ex.getSymbol());
     return Map.of("error", ex.getMessage());
+  }
+
+  @ExceptionHandler(MissingServletRequestParameterException.class)
+  @ResponseStatus(HttpStatus.BAD_REQUEST)
+  public Map<String, String> handleMissingParam(MissingServletRequestParameterException ex) {
+    return Map.of("error", "Missing required parameter: " + ex.getParameterName());
   }
 
   @ExceptionHandler(Exception.class)

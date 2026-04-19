@@ -7,12 +7,15 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import java.sql.SQLTransientConnectionException;
+import java.sql.SQLTransientException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.stereotype.Service;
 
 /**
@@ -170,19 +173,75 @@ public class BatchPersistenceService {
     }
   }
 
+  private static final long RETRY_BATCH_INITIAL_BACKOFF_MS = 1_000L;
+  private static final long RETRY_BATCH_MAX_BACKOFF_MS = 30_000L;
+  private static final int RETRY_BATCH_MAX_ATTEMPTS = 5;
+
   private void flush(List<Quote> batch) {
-    // Clear interrupt flag around JDBC so the shutdown interrupt doesn't corrupt the connection.
-    // The flag is restored in the finally block so the drainLoop catch sees it next iteration.
     boolean interrupted = Thread.interrupted();
     try {
       int inserted = quoteRepository.batchInsert(batch);
       log.debug("Persisted {}/{} quotes", inserted, batch.size());
     } catch (Exception e) {
-      log.error("Failed to persist batch of {}. Will retry individually.", batch.size(), e);
-      // Capped retry: try one-by-one so a single bad row doesn't kill the whole batch
-      retryOneByOne(batch);
+      if (isConnectionException(e)) {
+        log.warn(
+            "Connection-class exception persisting batch of {}. Retrying whole batch with backoff.",
+            batch.size(),
+            e);
+        retryWholeBatch(batch);
+      } else {
+        log.error("Failed to persist batch of {}. Will retry individually.", batch.size(), e);
+        retryOneByOne(batch);
+      }
     } finally {
       if (interrupted) Thread.currentThread().interrupt();
+    }
+  }
+
+  private boolean isConnectionException(Exception e) {
+    Throwable cause = e;
+    while (cause != null) {
+      if (cause instanceof SQLTransientConnectionException
+          || cause instanceof SQLTransientException
+          || cause instanceof CannotGetJdbcConnectionException) {
+        return true;
+      }
+      cause = cause.getCause();
+    }
+    return false;
+  }
+
+  private void retryWholeBatch(List<Quote> batch) {
+    long backoffMs = RETRY_BATCH_INITIAL_BACKOFF_MS;
+    for (int attempt = 1; attempt <= RETRY_BATCH_MAX_ATTEMPTS; attempt++) {
+      try {
+        Thread.sleep(backoffMs);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        log.warn("Interrupted during whole-batch retry — abandoning {} quotes", batch.size());
+        return;
+      }
+      try {
+        int inserted = quoteRepository.batchInsert(batch);
+        log.info("Whole-batch retry attempt {} succeeded — persisted {} quotes", attempt, inserted);
+        return;
+      } catch (Exception e) {
+        if (attempt < RETRY_BATCH_MAX_ATTEMPTS) {
+          log.warn(
+              "Whole-batch retry attempt {}/{} failed. Next backoff: {} ms",
+              attempt,
+              RETRY_BATCH_MAX_ATTEMPTS,
+              backoffMs * 2,
+              e);
+          backoffMs = Math.min(backoffMs * 2, RETRY_BATCH_MAX_BACKOFF_MS);
+        } else {
+          log.error(
+              "Whole-batch retry exhausted after {} attempts. Giving up on {} quotes.",
+              RETRY_BATCH_MAX_ATTEMPTS,
+              batch.size(),
+              e);
+        }
+      }
     }
   }
 
