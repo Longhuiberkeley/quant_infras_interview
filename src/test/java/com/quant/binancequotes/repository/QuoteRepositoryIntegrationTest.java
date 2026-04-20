@@ -3,11 +3,11 @@ package com.quant.binancequotes.repository;
 import static org.assertj.core.api.Assertions.*;
 
 import com.quant.binancequotes.model.Quote;
+import com.quant.binancequotes.websocket.BinanceWebSocketClient;
 import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import javax.sql.DataSource;
@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -35,6 +36,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @SpringBootTest
 @Testcontainers
 class QuoteRepositoryIntegrationTest {
+
+  @MockBean private BinanceWebSocketClient binanceWebSocketClient;
 
   @Container
   static final PostgreSQLContainer<?> postgres =
@@ -72,7 +75,7 @@ class QuoteRepositoryIntegrationTest {
         updateId,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 
   @Test

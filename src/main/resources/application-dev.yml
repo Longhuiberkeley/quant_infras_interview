@@ -11,3 +11,15 @@ spring:
     console:
       enabled: true
       path: /h2-console
+
+logging:
+  level:
+    com.quant.binancequotes: DEBUG
+
+persistence:
+  insert-sql: >
+    MERGE INTO quotes (symbol, bid_price, bid_size, ask_price, ask_size,
+                       update_id, event_time, transaction_time, received_at)
+    KEY (symbol, update_id)
+    VALUES (:symbol, :bid, :bidSize, :ask, :askSize,
+            :updateId, :eventTime, :transactionTime, :receivedAt)

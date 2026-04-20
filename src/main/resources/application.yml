@@ -35,11 +35,15 @@ management:
       show-details: always
       probes:
         enabled: true
+      group:
+        readiness:
+          include: readinessState, persistenceQueue, binanceStream
+        liveness:
+          include: livenessState
 
 logging:
   level:
     root: INFO
-    com.quant.binancequotes: DEBUG
 
 app:
   symbols:
@@ -53,6 +57,9 @@ app:
     - TRXUSDT
     - LINKUSDT
     - AVAXUSDT
+  rate-limit:
+    max-concurrent: 100
+    acquire-timeout-ms: 500
 
 binance:
   ws:
@@ -67,3 +74,9 @@ persistence:
   flush-ms: 500
   shutdown-timeout-ms: 5000
   drop-oldest-threshold: 0.9
+  insert-sql: >
+    INSERT INTO quotes (symbol, bid_price, bid_size, ask_price, ask_size,
+                        update_id, event_time, transaction_time, received_at)
+    VALUES (:symbol, :bid, :bidSize, :ask, :askSize,
+            :updateId, :eventTime, :transactionTime, :receivedAt)
+    ON CONFLICT (symbol, update_id) DO NOTHING

@@ -1,8 +1,6 @@
 package com.quant.binancequotes.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.math.BigDecimal;
-import java.time.Instant;
 
 /**
  * Immutable quote snapshot for a single instrument.
@@ -35,10 +33,9 @@ public record Quote(
     long updateId,
     long eventTime,
     long transactionTime,
-    Instant receivedAt) {
+    long receivedAt) {
 
   /** Returns the lag between now and the Binance event time, in milliseconds. */
-  @JsonIgnore
   public long lagMillis() {
     return System.currentTimeMillis() - eventTime;
   }

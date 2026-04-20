@@ -8,9 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.binancequotes.config.AppProperties;
 import com.quant.binancequotes.model.Quote;
+import com.quant.binancequotes.repository.QuoteHistoryRepository;
 import com.quant.binancequotes.service.QuoteService;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,6 +32,8 @@ class QuoteControllerTest {
   @MockBean private QuoteService quoteService;
 
   @MockBean private AppProperties appProperties;
+
+  @MockBean private QuoteHistoryRepository quoteHistoryRepository;
 
   @BeforeEach
   void setUp() {
@@ -141,7 +143,7 @@ class QuoteControllerTest {
             1L,
             System.currentTimeMillis(),
             System.currentTimeMillis(),
-            Instant.now());
+            System.currentTimeMillis());
     when(quoteService.get("ETHUSDT")).thenReturn(Optional.of(q));
 
     MvcResult result =
@@ -232,6 +234,6 @@ class QuoteControllerTest {
         updateId,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 }

@@ -7,8 +7,9 @@ import static org.mockito.Mockito.*;
 import com.quant.binancequotes.config.PersistenceProperties;
 import com.quant.binancequotes.model.Quote;
 import com.quant.binancequotes.repository.QuoteRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
-import java.time.Instant;
+import java.sql.SQLTransientConnectionException;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 
 class BatchPersistenceServiceTest {
 
@@ -36,7 +38,7 @@ class BatchPersistenceServiceTest {
         updateId,
         System.currentTimeMillis(),
         System.currentTimeMillis(),
-        Instant.now());
+        System.currentTimeMillis());
   }
 
   private PersistenceProperties smallProps() {
@@ -53,13 +55,14 @@ class BatchPersistenceServiceTest {
   private void startService(PersistenceProperties props) {
     mockRepo = mock(QuoteRepository.class);
     when(mockRepo.batchInsert(anyList())).thenReturn(0);
-    service = new BatchPersistenceService(props, mockRepo);
+    service = new BatchPersistenceService(props, mockRepo, new SimpleMeterRegistry());
+    service.startDrainer();
   }
 
-  /** Start service with a pre-configured mock (for tests that need custom stubs). */
   private void startServiceWithMock(QuoteRepository repo, PersistenceProperties props) {
     mockRepo = repo;
-    service = new BatchPersistenceService(props, mockRepo);
+    service = new BatchPersistenceService(props, mockRepo, new SimpleMeterRegistry());
+    service.startDrainer();
   }
 
   @AfterEach
@@ -168,7 +171,8 @@ class BatchPersistenceServiceTest {
     Thread t = service.drainerThread();
     assertNotNull(t, "Drainer thread should exist");
     assertEquals("quote-batch-writer", t.getName());
-    assertTrue(t.isVirtual(), "Drainer should be a virtual thread");
+    assertTrue(t.isAlive(), "Drainer thread should be running");
+    assertFalse(t.isVirtual(), "Drainer should be a platform thread");
   }
 
   @Test
@@ -354,5 +358,97 @@ class BatchPersistenceServiceTest {
             + service.droppedCount()
             + ")");
     assertEquals(0, service.droppedCount(), "No drops expected at 500 rps with 10k queue");
+  }
+
+  @Test
+  void connectionException_retriesWholeBatch() throws Exception {
+    AtomicInteger callCount = new AtomicInteger(0);
+    AtomicInteger totalInserted = new AtomicInteger(0);
+    QuoteRepository connFailingRepo = mock(QuoteRepository.class);
+
+    when(connFailingRepo.batchInsert(anyList()))
+        .thenAnswer(
+            inv -> {
+              int call = callCount.incrementAndGet();
+              if (call == 1) {
+                throw new RuntimeException(
+                    "connection failed",
+                    new SQLTransientConnectionException("connection timed out"));
+              }
+              int count = ((List<?>) inv.getArgument(0)).size();
+              totalInserted.addAndGet(count);
+              return count;
+            });
+
+    PersistenceProperties p = smallProps();
+    p.setQueueCapacity(100);
+    p.setBatchSize(50);
+    p.setFlushMs(100);
+    startServiceWithMock(connFailingRepo, p);
+
+    for (int i = 0; i < 5; i++) {
+      service.enqueue(makeQuote("TRXUSDT", i + 1));
+    }
+
+    // Wait for: flush (100ms) + retry backoff (1000ms) + retry execution + margin
+    Thread.sleep(2_000);
+    service.shutdown();
+
+    assertTrue(
+        totalInserted.get() >= 5,
+        "All quotes should be persisted after whole-batch retry, got " + totalInserted.get());
+    verify(connFailingRepo, atLeast(2)).batchInsert(anyList());
+  }
+
+  @Test
+  void connectionException_wrappedInSpringDao_retriesWholeBatch() throws Exception {
+    AtomicInteger callCount = new AtomicInteger(0);
+    QuoteRepository repo = mock(QuoteRepository.class);
+
+    when(repo.batchInsert(anyList()))
+        .thenAnswer(
+            inv -> {
+              int call = callCount.incrementAndGet();
+              if (call == 1) {
+                throw new CannotGetJdbcConnectionException("pool exhausted");
+              }
+              return ((List<?>) inv.getArgument(0)).size();
+            });
+
+    startServiceWithMock(repo, smallProps());
+
+    service.enqueue(makeQuote("LINKUSDT", 1));
+    Thread.sleep(2_000);
+    service.shutdown();
+
+    verify(repo, atLeast(2)).batchInsert(anyList());
+  }
+
+  @Test
+  void rowLevelException_usesRetryOneByOne() throws Exception {
+    AtomicInteger callCount = new AtomicInteger(0);
+    QuoteRepository repo = mock(QuoteRepository.class);
+
+    when(repo.batchInsert(anyList()))
+        .thenAnswer(
+            inv -> {
+              int call = callCount.incrementAndGet();
+              if (call == 1) {
+                throw new RuntimeException("constraint violation — not a connection error");
+              }
+              return 1;
+            });
+
+    startServiceWithMock(repo, smallProps());
+
+    service.enqueue(makeQuote("ADAUSDT", 1));
+    Thread.sleep(1_000);
+    service.shutdown();
+
+    int calls = callCount.get();
+    assertTrue(
+        calls >= 2,
+        "Row-level errors should trigger retryOneByOne (at least batch + single-item call), got "
+            + calls);
   }
 }

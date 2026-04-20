@@ -53,7 +53,7 @@ Phase 7.5 (and P10b after Phase 8). Each session picks up where the last left of
 ### P1.3 Every SLO has a corresponding test
 
 - **Result:** PASS
-- **Evidence:** All 5 SLOs from `architecture.md` §8 map to existing test methods: Read p99 < 1ms → `QuoteServicePerformanceTest#p99ReadUnder1ms`; REST p99 < 5ms → `QuoteControllerTest#p99LatencyUnder5ms`; Ingest-to-available p99 < 5ms → `ApplicationIntegrationTest#ingestLatencyUnder5ms`; Freshness lag p99 < 500ms → `IngestLagTest#lagGaugeUnder500msAt500rps`; Persistence headroom >= 10x → `BatchPersistenceServiceTest#sustains500rps`.
+- **Evidence:** All 5 SLOs from `architecture.md` §8 map to existing test methods: Read p99 < 1ms → `QuoteServicePerformanceTest#p99ReadUnder1ms`; REST p99 < 5ms → `QuoteControllerTest#p99LatencyUnder5ms`; Ingest-to-available p99 < 5ms → `ApplicationIntegrationTest#ingestLatencyUnder5ms`; Freshness lag p99 < 500ms → `LagGaugeTest#lagGaugeUnder500msAt500rps`; Persistence headroom >= 10x → `BatchPersistenceServiceTest#sustains500rps`.
 - **Fix (if needed):** N/A
 
 ---

@@ -2,6 +2,7 @@ package com.quant.binancequotes.websocket;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.quant.binancequotes.config.AppProperties;
 import com.quant.binancequotes.model.Quote;
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -14,7 +15,9 @@ class QuoteMessageParserTest {
 
   @BeforeEach
   void setUp() {
-    parser = new QuoteMessageParser();
+    AppProperties props = new AppProperties();
+    props.setSymbols(java.util.List.of("BTCUSDT", "ETHUSDT"));
+    parser = new QuoteMessageParser(props);
   }
 
   // ── Helper ─────────────────────────────────────────────────────────────────

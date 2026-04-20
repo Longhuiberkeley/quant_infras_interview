@@ -21,16 +21,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Tests that the Binance freshness-lag gauge stays under the SLO threshold under sustained load.
+ * Tests that the freshness-lag gauge reports measured age correctly and stays under the SLO
+ * threshold under sustained load.
  *
  * <p>Pumps 500 mock messages/sec through the {@link BinanceWebSocketClient} and asserts that the
- * {@code binance.quote.lag.max.millis} gauge stays under 500 ms at steady state.
+ * {@code binance.quote.lag.max.millis} gauge stays under 500 ms at steady state. Note: the test
+ * hard-codes {@code eventTime = now - 50ms}, so it validates gauge arithmetic — not actual
+ * end-to-end system lag.
  *
  * <p>Maps to SLO row in {@code docs/architecture.md} §8: "Binance freshness lag: p99 < 500 ms".
  */
-class IngestLagTest {
+class LagGaugeTest {
 
-  private static final Logger log = LoggerFactory.getLogger(IngestLagTest.class);
+  private static final Logger log = LoggerFactory.getLogger(LagGaugeTest.class);
   private static final int MESSAGES_PER_SECOND = 500;
   private static final int DURATION_SECONDS = 3;
   private static final long LAG_THRESHOLD_MS = 500L;
@@ -62,7 +65,6 @@ class IngestLagTest {
 
     quoteService = new QuoteService();
     BatchPersistenceService mockPersistence = mock(BatchPersistenceService.class);
-    // enqueue() is void — use doNothing() (default for void mocks, but be explicit)
     org.mockito.Mockito.doNothing().when(mockPersistence).enqueue(any(Quote.class));
 
     meterRegistry = new SimpleMeterRegistry();
@@ -73,7 +75,7 @@ class IngestLagTest {
             binanceProperties,
             quoteService,
             mockPersistence,
-            new QuoteMessageParser(),
+            new QuoteMessageParser(appProperties),
             meterRegistry);
   }
 
@@ -86,7 +88,6 @@ class IngestLagTest {
 
   @Test
   void lagGaugeUnder500msAt500rps() {
-    // Build a valid bookTicker message template
     String template =
         """
         {
@@ -120,20 +121,20 @@ class IngestLagTest {
 
     long startNs = System.nanoTime();
 
+    okhttp3.WebSocket mockWebSocket = mock(okhttp3.WebSocket.class);
+
     for (int i = 0; i < totalMessages; i++) {
       String symbol = symbols.get(i % symbols.size());
-      // eventTime is always slightly in the past (simulating ~50ms network delay)
       long eventTime = System.currentTimeMillis() - 50;
       String streamName = symbol.toLowerCase();
       String msg = String.format(template, streamName, i + 1, eventTime, eventTime, symbol);
 
-      client.onMessage(null, msg);
+      client.onMessage(mockWebSocket, msg);
     }
 
     long elapsedNs = System.nanoTime() - startNs;
     double elapsedMs = elapsedNs / 1_000_000.0;
 
-    // Read the fleet-max lag gauge from the meter registry
     var gauge = meterRegistry.find("binance.quote.lag.max.millis").gauge();
     assertThat(gauge).as("Fleet-max lag gauge should be registered").isNotNull();
     double maxLag = gauge.value();
@@ -142,7 +143,7 @@ class IngestLagTest {
     double actualRps = totalMessages / (elapsedMs / 1000.0);
 
     log.info(
-        "Ingest lag test — messages: {}, elapsed: {} ms, actual rate: {} msg/s, max lag: {} ms",
+        "Lag gauge test — messages: {}, elapsed: {} ms, actual rate: {} msg/s, max lag: {} ms",
         totalMessages,
         String.format("%.2f", elapsedMs),
         String.format("%.0f", actualRps),
@@ -166,7 +167,7 @@ class IngestLagTest {
       java.nio.file.Files.createDirectories(target.getParent());
       java.nio.file.Files.writeString(
           target,
-          "### IngestLagTest\n\n| SLO | Target | p50 | p99 | Pass |\n"
+          "### LagGaugeTest\n\n| SLO | Target | p50 | p99 | Pass |\n"
               + "|-----|--------|-----|-----|------|\n"
               + line,
           java.nio.file.StandardOpenOption.CREATE,

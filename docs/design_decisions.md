@@ -93,7 +93,7 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 - *Drop newest arrival.* Rejected: under backpressure, the newest data is the most valuable (it reflects current market state). Dropping the newest means the in-memory map and the DB diverge on *the most recent* quotes — the wrong direction.
 - *Spill to disk.* Rejected: complexity does not justify the benefit at this scale.
 
-**Consequences.** Under sustained DB outage we lose the oldest in-flight data. This is acceptable because (a) the in-memory map continues serving the *latest* to REST clients unaffected, (b) the DB regains consistency on every newer write, and (c) bursts of real pathological load at this scale are minutes long at worst — not hours.
+**Consequences.** Under sustained DB outage we lose the oldest in-flight data. This is an explicit deviation from the spec requirement to "persist the *complete* time-series history" — under pathological backpressure, the drop-oldest policy discards the oldest buffered quotes before they reach PostgreSQL. This trade-off is acceptable because (a) the in-memory map continues serving the *latest* to REST clients unaffected, (b) the DB regains consistency on every newer write, and (c) bursts of real pathological load at this scale are minutes long at worst — not hours. The cumulative drop count is tracked by the `binance.quotes.dropped.total` Micrometer counter and exposed in the `persistenceQueue` health indicator details.
 
 ---
 
@@ -112,17 +112,17 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 
 ---
 
-## DD-8 — `spring.threads.virtual.enabled=true`, plus one explicit virtual thread for the batch drainer
+## DD-8 — `spring.threads.virtual.enabled=true`, plus one explicit platform thread for the batch drainer
 
 **Context.** Java 21 virtual threads remove the need to size thread pools for I/O-bound work. Spring Boot 3.2+ integrates this at the framework level.
 
-**Decision.** Set `spring.threads.virtual.enabled=true` in `application.yml`. This makes Tomcat request handlers and `@Async` / auto-configured `TaskExecutor` beans use virtual threads. Separately, the batch-persistence drainer is started explicitly as `Thread.ofVirtual().name("quote-batch-writer").start(...)` from `@PostConstruct`, joined from `@PreDestroy`.
+**Decision.** Set `spring.threads.virtual.enabled=true` in `application.yml`. This makes Tomcat request handlers and `@Async` / auto-configured `TaskExecutor` beans use virtual threads. Separately, the batch-persistence drainer is started explicitly as `Thread.ofPlatform().name("quote-batch-writer").start(...)` from `@PostConstruct`, joined from `@PreDestroy`. A platform thread is used for the drainer because it is a single, long-lived, dedicated loop — virtual threads provide no benefit here (see TODO item "Fix Virtual Thread Misuse on Drainer").
 
 **Alternatives considered.**
 - *Manually create virtual threads everywhere.* Rejected: not idiomatic on Spring Boot 3.2+.
 - *Rely only on the property.* Rejected: the property covers request handlers and executor-backed tasks, not a dedicated, long-running drainer loop owned by one service. That loop is simpler as an explicit thread — no need to route it through an executor.
 
-**Consequences.** REST requests, the drainer, and any future `@Async` call all get virtual threads for free. Stack traces name the drainer (`quote-batch-writer`) so it's greppable in `jcmd Thread.print`.
+**Consequences.** REST requests and any future `@Async` call get virtual threads for free via the Spring property. The drainer uses a platform thread, which is simpler and more appropriate for a single long-lived loop. Stack traces name the drainer (`quote-batch-writer`) so it's greppable in `jcmd Thread.print`.
 
 ---
 
@@ -219,3 +219,31 @@ Entries are not listed in priority order; cross-reference IDs (`DD-n`) are stabl
 - **Per-symbol dedicated drainer threads.** One drainer scales fine to ~10⁴ msg/s. Revisit if sustained rate grows 100×.
 - **Metrics backend (Prometheus/OTel).** Actuator + the `binance.quote.lag.millis` gauge is enough signal for an interview project; production would add an exporter.
 - **Schema migrations (Flyway/Liquibase).** A single flat `schema.sql` is sufficient for one-day scope.
+
+---
+
+## DD-14 — Semaphore-based concurrency limiting on REST endpoints
+
+**Context.** The spec does not mandate rate limiting, but an unbounded API can be trivially DoSed by a misbehaving client. At the same time, the service is single-node and low-traffic (10 instruments, internal consumers), so a full token-bucket implementation (Bucket4j) is overkill.
+
+**Decision.** Add a `OncePerRequestFilter` backed by a `java.util.concurrent.Semaphore` with configurable permits (default 100). Requests to `/api/**` paths must acquire a permit before processing; if none is available within a timeout (default 500 ms), a 429 is returned. Non-API paths (actuator, etc.) bypass the filter entirely.
+
+**Alternatives considered.**
+- *Bucket4j token-bucket.* Rejected: adds a dependency for a problem that doesn't exist at this scale. Semaphore-based concurrency control is sufficient and zero-dependency.
+- *No rate limiting.* Acceptable for the original spec but noted as a gap by reviewers. Adding it demonstrates production-mindedness.
+
+**Consequences.** At most 100 concurrent API requests; others get 429. This is generous for 10 instruments and internal consumers. The semaphore is non-fair (the default); for 10 instruments with internal consumers, starvation is not a practical concern. With virtual threads enabled (`spring.threads.virtual.enabled=true`), `tryAcquire` blocks a virtual thread (cheap). The timeout (default 500 ms) bounds the wait.
+
+---
+
+## DD-15 — Historical quote query endpoint
+
+**Context.** The original spec requires only the latest quote per instrument. The persistence layer (PostgreSQL with a composite index on `(symbol, event_time DESC)`) is naturally suited for time-range queries, but no endpoint exposes this capability.
+
+**Decision.** Add `GET /api/quotes/{symbol}/history?from=X&to=Y` that queries PostgreSQL directly using `NamedParameterJdbcTemplate` with named parameters. Returns up to 1000 results ordered by `event_time DESC`. Uses the same `Quote` record for serialization (DD-12). Out of scope per original spec but noted as a future enhancement; implemented to demonstrate the persistence layer is queryable.
+
+**Alternatives considered.**
+- *No historical endpoint.* The original spec doesn't require it, but reviewers noted the absence.
+- *Streaming/cursor-based pagination.* Rejected for scope: `LIMIT 1000` is sufficient for an interview project.
+
+**Consequences.** This is the only REST endpoint that hits the database. The composite index `idx_quotes_symbol_time` makes the query efficient. No DTO layer — reuses the `Quote` record (DD-12). The endpoint validates the symbol against the configured allowlist, consistent with the latest-quote endpoint.

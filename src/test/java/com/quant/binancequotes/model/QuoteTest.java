@@ -3,12 +3,11 @@ package com.quant.binancequotes.model;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class QuoteTest {
 
-  private static final Instant NOW = Instant.now();
+  private static final long NOW = System.currentTimeMillis();
 
   private Quote sampleQuote() {
     return new Quote(
@@ -51,7 +50,7 @@ class QuoteTest {
             1L,
             eventTime,
             eventTime - 3,
-            Instant.now());
+            System.currentTimeMillis());
 
     long lag = q.lagMillis();
 
@@ -74,7 +73,7 @@ class QuoteTest {
             1L,
             pastEventTime,
             recentTxTime,
-            Instant.now());
+            System.currentTimeMillis());
 
     long lag = q.lagMillis();
 

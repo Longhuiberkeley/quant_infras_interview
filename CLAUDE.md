@@ -59,7 +59,7 @@ Installed versions: `21.0.6-tem` (Java), `3.9.14` (Maven).
 - **No firehose WebSocket subscription.** Never subscribe to `!bookTicker`. Build the targeted combined stream URL from the configured symbol list (DD-9).
 - **No blocking on the WebSocket thread.** The persistence queue uses non-blocking `offer` with drop-oldest backpressure; blocking would cause Binance to disconnect us (DD-6).
 - **No parameter interpolation in SQL.** Always `JdbcClient` named parameters.
-- **Reads never hit the DB.** `QuoteService` serves the `ConcurrentHashMap` (DD-3). Persistence is write-only from the application's perspective.
+- **Latest-quote reads never hit the DB.** `QuoteService` serves the `ConcurrentHashMap` (DD-3). The history endpoint queries PostgreSQL directly (DD-15). Persistence is otherwise write-only from the application's perspective.
 - **No hydrating the map from DB at startup.** The WebSocket repopulates in seconds; see `design_decisions.md` §deferrals.
 - **No `@Disabled` / `@Ignore`d tests.** Fix or delete.
 - **Exactly 10 symbols, uppercase, USDT-quoted.** Validated at startup (`AppProperties`); the list is configurable but the shape is not.
@@ -68,7 +68,7 @@ Installed versions: `21.0.6-tem` (Java), `3.9.14` (Maven).
 ## Architecture invariants
 
 - `Quote` is an immutable `record` with `BigDecimal` monetary fields and both `eventTime` (Binance) and `receivedAt` (local).
-- The batch drainer runs on a single virtual thread named `quote-batch-writer`. `@PreDestroy` drains the queue with a bounded timeout.
+- The batch drainer runs on a single platform thread named `quote-batch-writer`, started via `@PostConstruct`. `@PreDestroy` drains the queue with a bounded timeout.
 - `UNIQUE(symbol, update_id)` + `ON CONFLICT DO NOTHING` handles replay-after-reconnect dedup.
 - `BinanceStreamHealthIndicator` and `PersistenceQueueHealthIndicator` feed `/actuator/health`; orchestration relies on them.
 - `binance.quote.lag.millis` (Micrometer gauge) = `now − eventTime`. It's the single number that tells you real-time correctness.
@@ -81,6 +81,6 @@ One commit per phase of `docs/implementation_plan.md`, conventional prefix (`fea
 
 - ORMs, caching libraries, message brokers, Reactive Netty — none are justified at this scale.
 - Schema migration tools (Flyway/Liquibase) — one flat `schema.sql` is enough here.
-- Historical REST endpoints — the spec asks for latest only.
+- Historical REST endpoints — the spec asks for latest only. (DD-15 adds a history endpoint; this item now refers to further expansion like streaming/cursor pagination.)
 - Extra metrics backends — actuator is sufficient for an interview project.
 - Reconnect triggered from `onClosing`. Reconnect lives in `onClosed` and `onFailure`, guarded by an atomic flag.

@@ -14,31 +14,31 @@
  stream for 10 pairs    │  │  - heartbeat      │    │ GET /api/quotes │◄───── Consumers
                         │  │  - lag gauge      │    │ GET /api/quotes │    │
                         │  └────────┬─────────┘    │   /{symbol}     │    │
-                        │           │              └────────┬────────┘    │
-                        │           ▼                       │             │
-                        │  ┌──────────────────┐             │             │
-                        │  │ QuoteMessageParser│             │             │
-                        │  │  (JSON → Quote)   │             │             │
-                        │  │  BigDecimal fields │             │             │
-                        │  └────────┬─────────┘             │             │
-                        │           │                        │             │
-                        │     ┌─────┴──────┐                 │             │
-                        │     ▼            ▼                 │             │
-                        │  ┌──────────┐ ┌─────────────────┐  │             │
-                        │  │QuoteSvc  │ │BatchPersistSvc  │  │             │
-                        │  │(Concurrent│ │(LinkedBlocking- │  │             │
-                        │  │ HashMap)  │ │ Queue → virtual │  │             │
-                        │  │ O(1) reads│ │ thread drainer) │  │             │
-                        │  └─────┬────┘ └───────┬─────────┘  │             │
-                        │        │              │             │             │
-                        │        │              ▼             │             │
-                        │        │     ┌───────────────────┐ │             │
-                        │        │     │  PostgreSQL 16     │ │             │
-                        │        │     │  quotes(NUMERIC,   │ │             │
-                        │        │     │  UNIQUE(symbol,    │ │             │
-                        │        │     │         update_id))│ │             │
-                        │        │     └───────────────────┘ │             │
-                        │        └───────────────────────────┘             │
+                        │           │              │ GET /api/quotes │    │
+                        │           ▼              │   /{symbol}     │    │
+                        │  ┌──────────────────┐    │   /history      │    │
+                        │  │ QuoteMessageParser│    │       │    │    │
+                        │  │  (JSON → Quote)   │    └───────┼────┼────┘    │
+                        │  │  BigDecimal fields │            │    │         │
+                        │  └────────┬─────────┘             │    │         │
+                        │           │                        │    │         │
+                        │     ┌─────┴──────┐                 │    │         │
+                        │     ▼            ▼                 │    │         │
+                        │  ┌──────────┐ ┌─────────────────┐  │    │         │
+                        │  │QuoteSvc  │ │BatchPersistSvc  │  │    │         │
+                        │  │(Concurrent│ │(LinkedBlocking- │  │    │         │
+                        │  │ HashMap)  │ │ Queue → platform│  │    │         │
+                        │  │ O(1) reads│ │ thread drainer) │  │    │         │
+                        │  └─────┬────┘ └───────┬─────────┘  │    │         │
+                        │        │              │             │    │         │
+                        │        │              ▼             │    │         │
+                        │        │     ┌───────────────────┐ │    │         │
+                        │        │     │  PostgreSQL 16     │◄┼────┘         │
+                        │        │     │  quotes(NUMERIC,   │ │ (history     │
+                        │        │     │  UNIQUE(symbol,    │ │  endpoint    │
+                        │        │     │         update_id))│ │  only)       │
+                        │        │     └───────────────────┘ │              │
+                        │        └───────────────────────────┘              │
                         └──────────────────────────────────────────────────┘
 ```
 
@@ -49,12 +49,12 @@
 3. **Route — two parallel paths.**
    - **Hot path (reads):** `QuoteService` updates a `ConcurrentHashMap<String, Quote>`. O(1) reads, sub-microsecond in practice.
    - **Warm path (persistence):** `BatchPersistenceService` `offer`s onto a bounded `LinkedBlockingQueue<Quote>` (capacity 10 000). A single named virtual thread drains up to `persistence.batch-size` items (default 200) or flushes on `persistence.flush-ms` timeout (default 500), whichever comes first, and issues one `INSERT ... ON CONFLICT (symbol, update_id) DO NOTHING` via `JdbcClient.batchUpdate`.
-4. **Serve.** `QuoteController` exposes REST endpoints backed entirely by the in-memory map. The DB is never queried on the read path.
+4. **Serve.** `QuoteController` exposes REST endpoints; latest-quote endpoints are backed by the in-memory map (DD-3) while the history endpoint queries PostgreSQL directly (DD-15).
 5. **Observe.** `/actuator/health` aggregates the default DB check with two custom indicators (`binanceStream`, `persistenceQueue`). The Micrometer gauge `binance.quote.lag.millis` tracks `now − eventTime` so freshness is one number away.
 
 ## 3. Key Design Decisions
 
-See [`design_decisions.md`](./design_decisions.md) for ADR-style entries covering each non-obvious choice: `JdbcClient` over JPA, `BigDecimal` over `double`, in-memory map for reads, OkHttp over the JDK WebSocket client, PostgreSQL over TSDB alternatives, drop-oldest backpressure, natural dedup via `(symbol, update_id)`, the virtual-threads property, and targeted over firehose subscription.
+See [`design_decisions.md`](./design_decisions.md) for ADR-style entries covering each non-obvious choice: `JdbcClient` over JPA, `BigDecimal` over `double`, in-memory map for reads, OkHttp over the JDK WebSocket client, PostgreSQL over TSDB alternatives, drop-oldest backpressure, natural dedup via `(symbol, update_id)`, the virtual-threads property, targeted over firehose subscription, semaphore-based concurrency limiting (DD-14), and the historical quote query endpoint (DD-15).
 
 ## 4. Technology Stack
 
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS quotes (
     update_id        BIGINT NOT NULL,
     event_time       BIGINT NOT NULL,   -- Binance `E` (ms since epoch)
     transaction_time BIGINT NOT NULL,   -- Binance `T` (ms since epoch)
-    received_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    received_at      BIGINT NOT NULL,         -- local clock (ms since epoch)
     CONSTRAINT quotes_symbol_updateid_uk UNIQUE (symbol, update_id),
     CONSTRAINT chk_positive_bid  CHECK (bid_price > 0),
     CONSTRAINT chk_positive_ask  CHECK (ask_price > 0),
@@ -124,6 +124,7 @@ CREATE INDEX IF NOT EXISTS idx_quotes_symbol_time
 |--------|------|-------------|
 | GET | `/api/quotes` | Latest quote for each of the 10 configured instruments (map keyed by symbol) |
 | GET | `/api/quotes/{symbol}` | Latest quote for a specific instrument (`BTCUSDT`, …) — 404 if unknown |
+| GET | `/api/quotes/{symbol}/history?from=X&to=Y` | Historical quotes from PostgreSQL for a time range (epoch millis, max 1000 results) |
 | GET | `/actuator/health` | Aggregated health (DB + WS + queue) |
 | GET | `/actuator/metrics/binance.quote.lag.millis` | Freshness lag gauge (now − eventTime) |
 
